@@ -95,6 +95,7 @@
         "@nestjs/throttler": "^6",
         "@node-rs/argon2": "^2",
         "cookie-parser": "^1.4.7",
+        "dotenv": "^16",
         "pino": "^9",
         "reflect-metadata": "^0.2.2",
         "rxjs": "^7.8",
