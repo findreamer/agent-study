@@ -7,3 +7,153 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum CommonStatus {
+  ENABLED
+  DISABLED
+}
+
+enum MenuType {
+  DIR
+  MENU
+  BUTTON
+}
+
+enum DataScope {
+  ALL
+  DEPT_AND_SUB
+  DEPT
+  SELF
+}
+
+model System {
+  id        String       @id @default(cuid())
+  code      String       @unique
+  name      String
+  status    CommonStatus @default(ENABLED)
+  sort      Int          @default(0)
+  roles     Role[]
+  menus     Menu[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Department {
+  id        String       @id @default(cuid())
+  parentId  String?
+  parent    Department?  @relation("DeptTree", fields: [parentId], references: [id])
+  children  Department[] @relation("DeptTree")
+  name      String
+  leader    String?
+  sort      Int          @default(0)
+  status    CommonStatus @default(ENABLED)
+  users     User[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@index([parentId])
+}
+
+model User {
+  id            String         @id @default(cuid())
+  username      String         @unique
+  passwordHash  String
+  nickname      String
+  email         String?
+  status        UserStatus     @default(ACTIVE)
+  isSuperadmin  Boolean        @default(false)
+  departmentId  String?
+  department    Department?    @relation(fields: [departmentId], references: [id])
+  lastLoginAt   DateTime?
+  roles         UserRole[]
+  refreshTokens RefreshToken[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([departmentId])
+}
+
+model Role {
+  id        String       @id @default(cuid())
+  systemId  String
+  system    System       @relation(fields: [systemId], references: [id])
+  code      String
+  name      String
+  status    CommonStatus @default(ENABLED)
+  priority  Int          @default(100)
+  dataScope DataScope    @default(SELF)
+  remark    String?
+  users     UserRole[]
+  menus     RoleMenu[]
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([systemId, code])
+  @@index([systemId])
+}
+
+model Menu {
+  id             String       @id @default(cuid())
+  systemId       String
+  system         System       @relation(fields: [systemId], references: [id])
+  parentId       String?
+  parent         Menu?        @relation("MenuTree", fields: [parentId], references: [id])
+  children       Menu[]       @relation("MenuTree")
+  type           MenuType
+  name           String
+  path           String?
+  component      String?
+  icon           String?
+  permissionCode String?
+  visible        Boolean      @default(true)
+  status         CommonStatus @default(ENABLED)
+  sort           Int          @default(0)
+  roles          RoleMenu[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([systemId, permissionCode])
+  @@index([systemId, parentId])
+}
+
+model UserRole {
+  userId String
+  roleId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model RoleMenu {
+  roleId String
+  menuId String
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  menu   Menu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, menuId])
+  @@index([menuId])
+}
+
+model RefreshToken {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  familyId       String
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  rotatedAt      DateTime?
+  revokedAt      DateTime?
+  reuseFlaggedAt DateTime?
+  userAgent      String?
+  ip             String?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId, familyId])
+}

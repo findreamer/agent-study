@@ -40,7 +40,9 @@
       "name": "@agent-study/database",
       "version": "0.0.1",
       "dependencies": {
+        "@nestjs/common": "^12",
         "@prisma/client": "^6.1.0",
+        "reflect-metadata": "^0.2.2",
       },
       "devDependencies": {
         "@types/node": "^24.0.0",
