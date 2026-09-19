@@ -1,0 +1,48 @@
+{
+  "name": "@agent-study/user-system",
+  "version": "0.0.1",
+  "description": "",
+  "author": "",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "rm -rf dist tsconfig.tsbuildinfo && nest build",
+    "start": "bun run dist/main.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.config.e2e.ts"
+  },
+  "dependencies": {
+    "@agent-study/contracts": "workspace:*",
+    "@agent-study/database": "workspace:*",
+    "@nestjs/common": "^12",
+    "@nestjs/core": "^12",
+    "@nestjs/jwt": "^11",
+    "@nestjs/platform-express": "^12",
+    "@nestjs/throttler": "^6",
+    "@node-rs/argon2": "^2",
+    "cookie-parser": "^1.4.7",
+    "pino": "^9",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8",
+    "zod": "^3.25"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^12",
+    "@nestjs/schematics": "^12",
+    "@nestjs/testing": "^12",
+    "@types/cookie-parser": "^1.4.10",
+    "@types/express": "^5",
+    "@types/node": "^24",
+    "@types/supertest": "^7",
+    "source-map-support": "^0.5",
+    "supertest": "^7",
+    "typescript": "^5.7",
+    "vite-tsconfig-paths": "^5",
+    "vitest": "^4"
+  }
+}

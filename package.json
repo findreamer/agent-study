@@ -8,10 +8,12 @@
     "packages/*"
   ],
   "scripts": {
-    "clean:ports": "for port in 3002 4001; do lsof -ti :$port | xargs kill -9 2>/dev/null; done; echo 'Ports cleaned'",
+    "clean:ports": "for port in 3002 3003 4001 4002; do lsof -ti :$port | xargs kill -9 2>/dev/null; done; echo 'Ports cleaned'",
     "dev": "bun run clean:ports && turbo run dev --parallel --filter=@agent-study/chat --filter=@agent-study/chat-web",
     "dev:chat-web": "turbo run dev --filter=@agent-study/chat-web",
     "dev:chat": "turbo run dev --filter=@agent-study/chat",
+    "dev:user-system": "turbo run dev --filter=@agent-study/user-system",
+    "db:up": "docker compose -f infra/compose/compose.yaml -f infra/compose/compose.dev.yaml up -d postgres",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "turbo run lint"
