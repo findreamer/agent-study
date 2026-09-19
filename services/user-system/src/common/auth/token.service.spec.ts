@@ -1,9 +1,9 @@
 import { UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { PrismaService } from '@agent-study/database';
+import type { RefreshToken } from '@agent-study/database/prisma';
 import { TokenService, ReuseDetectedException } from './token.service.js';
-import type { RefreshToken } from '@agent-study/database';
+import type { PrismaService } from '../prisma/prisma.service.js';
 
 interface MockRow extends Partial<RefreshToken> {
   tokenHash: string;

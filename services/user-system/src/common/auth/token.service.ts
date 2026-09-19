@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
-import { PrismaService } from '@agent-study/database';
+import { PrismaService } from '../prisma/prisma.service.js';
 import { env } from '../config/env.js';
 import {
   RT_TTL_MS,

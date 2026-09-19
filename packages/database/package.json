@@ -4,10 +4,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts",
-    "./prisma": "./src/generated/client/index.ts"
+    ".": {
+      "types": "./src/generated/client/index.d.ts",
+      "default": "./src/generated/client/index.js"
+    },
+    "./prisma": {
+      "types": "./src/generated/client/index.d.ts",
+      "default": "./src/generated/client/index.js"
+    }
   },
-  "types": "./src/index.ts",
   "scripts": {
     "prisma:generate": "prisma generate --schema=prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=prisma/schema.prisma",
@@ -15,10 +20,11 @@
     "db:seed": "bun run prisma/seed.ts",
     "typecheck": "tsc --noEmit"
   },
+  "prisma": {
+    "seed": "bun run prisma/seed.ts"
+  },
   "dependencies": {
-    "@nestjs/common": "^12",
-    "@prisma/client": "^6.1.0",
-    "reflect-metadata": "^0.2.2"
+    "@prisma/client": "^6.1.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

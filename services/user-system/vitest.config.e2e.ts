@@ -8,5 +8,10 @@ export default defineConfig({
     root: './',
     include: ['test/**/*.e2e-spec.ts'],
     setupFiles: ['src/test/setup.ts'],
+    server: {
+      deps: {
+        external: [/packages[\\/]database[\\/]src/],
+      },
+    },
   },
 });
