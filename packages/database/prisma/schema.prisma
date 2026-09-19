@@ -146,6 +146,7 @@ model RefreshToken {
   userId         String
   user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   familyId       String
+  systemId       String
   tokenHash      String    @unique
   expiresAt      DateTime
   rotatedAt      DateTime?
