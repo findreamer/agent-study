@@ -23,7 +23,8 @@ out/
 packages/database/src/generated/
 
 .claude
-/docs/
+/docs/*
+!/docs/superpowers/
 CLAUDE.md
 uploads/
 **/uploads/
