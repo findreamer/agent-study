@@ -1,0 +1,3 @@
+# isolated installs 会让每个工作区的依赖边界更清晰，能更早暴露“隐式依赖”和“幽灵依赖”
+[install]
+linker = "isolated" 

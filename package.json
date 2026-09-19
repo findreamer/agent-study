@@ -1,0 +1,28 @@
+{
+  "name": "agent-study",
+  "version": "1.0.0",
+  "description": "",
+  "workspaces": [
+    "clients/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "clean:ports": "for port in 3002 4001; do lsof -ti :$port | xargs kill -9 2>/dev/null; done; echo 'Ports cleaned'",
+    "dev": "bun run clean:ports && turbo run dev --parallel --filter=@agent-study/chat --filter=@agent-study/chat-web",
+    "dev:chat-web": "turbo run dev --filter=@agent-study/chat-web",
+    "dev:chat": "turbo run dev --filter=@agent-study/chat",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "lint": "turbo run lint"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "private": true,
+  "packageManager": "bun@1.4.2",
+  "dependencies": {
+    "turbo": "^2.8.20",
+    "wait-on": "^9.0.5"
+  }
+}
