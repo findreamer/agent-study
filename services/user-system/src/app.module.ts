@@ -10,6 +10,7 @@ import { RbacModule } from './common/rbac/rbac.module.js';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
 import { PermissionsGuard } from './common/guards/permissions.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
+import { DepartmentsModule } from './modules/departments/departments.module.js';
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { AuthModule } from './modules/auth/auth.module.js';
     JwtModule.register({ global: true }),
     ThrottlerModule.forRoot([{ ttl: 60_000, limit: 300 }]),
     AuthModule,
+    DepartmentsModule,
   ],
   controllers: [AppController],
   providers: [
