@@ -12,6 +12,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { DepartmentsModule } from './modules/departments/departments.module.js';
+import { SystemsModule } from './modules/systems/systems.module.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { DepartmentsModule } from './modules/departments/departments.module.js';
     AuthModule,
     UsersModule,
     DepartmentsModule,
+    SystemsModule,
   ],
   controllers: [AppController],
   providers: [
