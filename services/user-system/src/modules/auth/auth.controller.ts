@@ -1,6 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
+  Get,
+  Param,
   Post,
   Req,
   Res,
@@ -8,7 +11,14 @@ import {
 } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { loginSchema, type LoginInput } from '@agent-study/contracts';
+import {
+  changePasswordSchema,
+  loginSchema,
+  switchSystemSchema,
+  type ChangePasswordInput,
+  type LoginInput,
+  type SwitchSystemInput,
+} from '@agent-study/contracts';
 import { ZodValidationPipe } from '../../common/pipes/zod-validation.pipe.js';
 import { Public } from '../../common/decorators/public.decorator.js';
 import { CurrentUser } from '../../common/decorators/current-user.decorator.js';
@@ -80,5 +90,49 @@ export class AuthController {
     }
     clearRefreshCookie(res);
     return { ok: true };
+  }
+
+  private async currentFamilyId(req: Request): Promise<string | null> {
+    const raw = (req.cookies as Record<string, string | undefined> | undefined)?.[
+      REFRESH_COOKIE
+    ];
+    return raw ? this.tokens.familyIdOfRaw(raw) : null;
+  }
+
+  @Get('profile')
+  profile(@CurrentUser() user: AuthUser) {
+    return this.authService.profile(user);
+  }
+
+  @Post('switch-system')
+  async switchSystem(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(switchSystemSchema)) body: SwitchSystemInput,
+    @Req() req: Request,
+  ) {
+    const familyId = await this.currentFamilyId(req);
+    return this.authService.switchSystem(user, body, familyId);
+  }
+
+  @Get('sessions')
+  async sessions(@CurrentUser() user: AuthUser, @Req() req: Request) {
+    const familyId = await this.currentFamilyId(req);
+    return this.authService.sessions(user, familyId);
+  }
+
+  @Delete('sessions/:familyId')
+  revokeSession(@CurrentUser() user: AuthUser, @Param('familyId') familyId: string) {
+    return this.authService.revokeSession(user, familyId);
+  }
+
+  @Post('change-password')
+  changePassword(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(changePasswordSchema)) body: ChangePasswordInput,
+    @Req() req: Request,
+  ) {
+    return this.currentFamilyId(req).then((familyId) =>
+      this.authService.changePassword(user, body, familyId),
+    );
   }
 }

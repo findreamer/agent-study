@@ -125,4 +125,13 @@ describe('TokenService', () => {
     expect(prisma.rows.find((r) => r.familyId === familyA)?.revokedAt).toBeNull();
     expect(prisma.rows.find((r) => r.familyId === familyB)?.revokedAt).toBeInstanceOf(Date);
   });
+
+  it('reissueAccessToken signs a token carrying the new system id', async () => {
+    const at = await tokens.reissueAccessToken(user, 'sys2');
+    const payload = await new JwtService().verifyAsync(at, {
+      secret: process.env.JWT_SECRET,
+    });
+    expect(payload.systemId).toBe('sys2');
+    expect(payload.sub).toBe('u1');
+  });
 });
