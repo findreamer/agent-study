@@ -14,6 +14,7 @@ import { UsersModule } from './modules/users/users.module.js';
 import { DepartmentsModule } from './modules/departments/departments.module.js';
 import { SystemsModule } from './modules/systems/systems.module.js';
 import { RolesModule } from './modules/roles/roles.module.js';
+import { MenusModule } from './modules/menus/menus.module.js';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { RolesModule } from './modules/roles/roles.module.js';
     DepartmentsModule,
     SystemsModule,
     RolesModule,
+    MenusModule,
   ],
   controllers: [AppController],
   providers: [
