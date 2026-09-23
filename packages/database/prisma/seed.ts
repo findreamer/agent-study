@@ -91,19 +91,21 @@ async function menu(input: MenuInput) {
 }
 
 const sysDir = await menu({ type: 'DIR', name: '系统管理', icon: 'settings', sort: 1 });
-const profileDir = await menu({ type: 'DIR', name: '个人中心', icon: 'user', sort: 2 });
+const profileDir = await menu({ type: 'DIR', name: '个人中心', icon: 'user-circle', sort: 2 });
 
 async function pageWithButtons(
+  parent: { id: string },
   sort: number,
-  page: { name: string; path: string; component: string; code: string },
+  page: { name: string; path: string; component: string; code: string; icon: string },
   buttonCodes: string[],
 ) {
   const pageNode = await menu({
-    parentId: sysDir.id,
+    parentId: parent.id,
     type: 'MENU',
     name: page.name,
     path: page.path,
     component: page.component,
+    icon: page.icon,
     permissionCode: page.code,
     sort,
   });
@@ -121,40 +123,39 @@ async function pageWithButtons(
   return pageNode;
 }
 
-const usersPage = await pageWithButtons(1, {
+await pageWithButtons(sysDir, 1, {
   name: '用户管理',
-  path: '/system/users',
-  component: 'system/users',
+  path: '/users',
+  component: 'users',
   code: 'user:list',
-}, ['user:create', 'user:update', 'user:delete', 'user:reset-password']);
+  icon: 'users',
+}, [
+  'user:create',
+  'user:update',
+  'user:delete',
+  'user:reset-password',
+  // 部门管理并入用户页：这些按钮码保护 departments 接口
+  'dept:list',
+  'department:create',
+  'department:update',
+  'department:delete',
+]);
 
-const rolesPage = await pageWithButtons(2, {
+await pageWithButtons(sysDir, 2, {
   name: '角色管理',
-  path: '/system/roles',
-  component: 'system/roles',
+  path: '/roles',
+  component: 'roles',
   code: 'role:list',
+  icon: 'key-round',
 }, ['role:create', 'role:update', 'role:delete']);
 
-const menusPage = await pageWithButtons(3, {
-  name: '菜单管理',
-  path: '/system/menus',
-  component: 'system/menus',
+await pageWithButtons(sysDir, 3, {
+  name: '权限配置中心',
+  path: '/permission-center',
+  component: 'permission-center',
   code: 'menu:list',
+  icon: 'shield-check',
 }, ['menu:create', 'menu:update', 'menu:delete']);
-
-const deptsPage = await pageWithButtons(4, {
-  name: '部门管理',
-  path: '/system/departments',
-  component: 'system/departments',
-  code: 'dept:list',
-}, ['department:create', 'department:update', 'department:delete']);
-
-const systemsPage = await pageWithButtons(5, {
-  name: '系统管理',
-  path: '/system/systems',
-  component: 'system/systems',
-  code: 'system:list',
-}, ['system:create', 'system:update', 'system:delete']);
 
 await menu({
   parentId: profileDir.id,
@@ -162,15 +163,8 @@ await menu({
   name: '个人信息',
   path: '/profile',
   component: 'profile',
+  icon: 'user-circle',
   sort: 1,
-});
-await menu({
-  parentId: profileDir.id,
-  type: 'MENU',
-  name: '会话管理',
-  path: '/profile/sessions',
-  component: 'profile/sessions',
-  sort: 2,
 });
 
 // ---- Users -------------------------------------------------------------------
@@ -204,8 +198,8 @@ const deptManager = await prisma.role.upsert({
   },
 });
 
-// 用户查看 + 用户编辑 + 部门查看
-const grantCodes = ['user:list', 'user:update', 'dept:list'];
+// 用户查看 + 用户编辑 + 部门查看/维护（部门管理并入用户页）
+const grantCodes = ['user:list', 'user:update', 'dept:list', 'department:create', 'department:update'];
 const grantedMenus = await prisma.menu.findMany({
   where: { systemId: adminSystem.id, permissionCode: { in: grantCodes } },
   select: { id: true },
