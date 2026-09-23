@@ -1,0 +1,16 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "@heroui/styles/css";
+
+@theme {
+  /* design-system/rbac-admin/MASTER.md tokens */
+  --font-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --color-primary: #1e40af;
+  --color-primary-hover: #1e3a8a;
+  --color-background: #f8fafc;
+  --color-foreground: #1e293b;
+  --color-muted: #e2e8f0;
+  --color-muted-foreground: #475569;
+  --color-border: #e2e8f0;
+  --color-destructive: #dc2626;
+}
