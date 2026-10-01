@@ -265,7 +265,12 @@ export function UserDrawer({
                   }))
                 }
               >
-                {role.name}
+                <Checkbox.Content>
+                  <Checkbox.Control>
+                    <Checkbox.Indicator />
+                  </Checkbox.Control>
+                  {role.name}
+                </Checkbox.Content>
               </Checkbox>
             ))}
           </div>
