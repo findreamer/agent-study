@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { commonStatusEnum, menuTypeEnum } from './enums.js';
-import type { CommonStatus, MenuType } from './enums.js';
+import { commonStatusEnum, menuTypeEnum } from './enums';
+import type { CommonStatus, MenuType } from './enums';
 
 const permissionCodeRule = z
   .string()

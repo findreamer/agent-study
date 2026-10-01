@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { userBriefSchema } from './user.js';
-import { systemBriefSchema } from './system.js';
-import { menuNodeSchema } from './menu.js';
+import { userBriefSchema } from './user';
+import { systemBriefSchema } from './system';
+import { menuNodeSchema } from './menu';
 
 export const loginSchema = z.object({
   username: z.string().min(4).max(32),

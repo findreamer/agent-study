@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { userStatusEnum } from './enums.js';
-import { listQuerySchema } from './common.js';
+import { userStatusEnum } from './enums';
+import { listQuerySchema } from './common';
 
 export const userBriefSchema = z.object({
   id: z.string(),

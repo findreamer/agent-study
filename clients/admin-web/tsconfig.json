@@ -20,9 +20,7 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"],
-      "@agent-study/contracts": ["../../packages/contracts/src/index.ts"],
-      "@agent-study/contracts/*": ["../../packages/contracts/src/*"]
+      "@/*": ["./src/*"]
     }
   },
   "include": [

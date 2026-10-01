@@ -1,7 +1,7 @@
 import { z } from 'zod';
-import { codePattern } from './system.js';
-import { commonStatusEnum, dataScopeEnum } from './enums.js';
-import { listQuerySchema } from './common.js';
+import { codePattern } from './system';
+import { commonStatusEnum, dataScopeEnum } from './enums';
+import { listQuerySchema } from './common';
 
 export const roleBriefSchema = z.object({
   id: z.string(),

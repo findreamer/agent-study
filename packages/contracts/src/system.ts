@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { commonStatusEnum } from './enums.js';
+import { commonStatusEnum } from './enums';
 
 export const codePattern = /^[a-z0-9_-]+$/;
 

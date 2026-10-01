@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { commonStatusEnum } from './enums.js';
-import type { CommonStatus } from './enums.js';
+import { commonStatusEnum } from './enums';
+import type { CommonStatus } from './enums';
 
 export const createDepartmentSchema = z.object({
   parentId: z.string().nullable().optional(),
