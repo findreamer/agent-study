@@ -38,7 +38,7 @@ function MenuLink({ menu }: { menu: MenuNode }) {
       className={`relative flex h-10 cursor-pointer items-center gap-3 rounded-md px-3 text-sm transition-colors ${
         active
           ? 'bg-primary/10 font-medium text-primary'
-          : 'text-foreground/80 hover:bg-muted/40 hover:text-foreground'
+          : 'text-foreground/80 hover:bg-secondary hover:text-foreground'
       }`}
     >
       {active ? (

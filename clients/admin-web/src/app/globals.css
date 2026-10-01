@@ -9,10 +9,14 @@
   --color-primary-hover: #1e3a8a;
   --color-background: #f8fafc;
   --color-foreground: #1e293b;
-  --color-muted: #e2e8f0;
+  /* HeroUI 组件（如表头 text-muted）把 --color-muted 当弱文字色消费，
+     不能覆盖成浅灰背景值；浅灰底色用 --color-secondary */
+  --color-muted: #475569;
   --color-muted-foreground: #475569;
+  --color-secondary: #f1f5f9;
   --color-border: #e2e8f0;
   --color-destructive: #dc2626;
+  --color-success: #16a34a;
 }
 
 /* HeroUI v3 组件消费的是自身语义变量（--accent/--background/...），需按 MASTER.md 覆盖 */
