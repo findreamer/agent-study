@@ -90,12 +90,10 @@ export function Header() {
           </Select>
         ) : null}
         <Dropdown>
-          <Dropdown.Trigger>
-            <Button variant="ghost" className="gap-2">
-              <UserCircle size={18} aria-hidden />
-              {user?.nickname ?? user?.username}
-            </Button>
-          </Dropdown.Trigger>
+          <Button variant="ghost" className="gap-2">
+            <UserCircle size={18} aria-hidden />
+            {user?.nickname ?? user?.username}
+          </Button>
           <Dropdown.Popover>
             <Dropdown.Menu onAction={(key) => void handleMenuAction(String(key))}>
               <Dropdown.Item id="profile" textValue="个人信息">

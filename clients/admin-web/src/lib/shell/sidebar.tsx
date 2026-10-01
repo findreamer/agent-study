@@ -65,8 +65,22 @@ export function Sidebar() {
       <nav className="flex flex-col gap-1 overflow-y-auto px-3 py-4">
         {visible.map((node) =>
           node.type === 'DIR' ? (
-            <div key={node.id} className="pt-4 pb-1 first:pt-0">
-              <div className="px-3 text-xs text-muted-foreground">{node.name}</div>
+            <div key={node.id}>
+              <div className="px-3 pb-1 pt-4 text-xs text-muted-foreground">
+                {node.name}
+              </div>
+              <div className="flex flex-col gap-1">
+                {(node.children ?? [])
+                  .filter(
+                    (child) =>
+                      child.status === 'ENABLED' &&
+                      child.visible &&
+                      child.type === 'MENU',
+                  )
+                  .map((child) => (
+                    <MenuLink key={child.id} menu={child} />
+                  ))}
+              </div>
             </div>
           ) : (
             <MenuLink key={node.id} menu={node} />
