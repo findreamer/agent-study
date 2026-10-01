@@ -2,7 +2,7 @@
 @import "@heroui/styles/css";
 
 @theme {
-  /* design-system/rbac-admin/MASTER.md tokens */
+  /* design-system/rbac-admin/MASTER.md tokens —— 供自有 Tailwind 工具类使用（bg-primary 等） */
   --font-sans: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'PingFang SC', 'Microsoft YaHei', sans-serif;
   --color-primary: #1e40af;
@@ -13,4 +13,19 @@
   --color-muted-foreground: #475569;
   --color-border: #e2e8f0;
   --color-destructive: #dc2626;
+}
+
+/* HeroUI v3 组件消费的是自身语义变量（--accent/--background/...），需按 MASTER.md 覆盖 */
+:root {
+  --accent: #1e40af;
+  --accent-hover: #1e3a8a;
+  --accent-foreground: #ffffff;
+  --focus: #1e40af;
+  --background: #f8fafc;
+  --foreground: #1e293b;
+  --muted: #475569;
+  --border: #e2e8f0;
+  --danger: #dc2626;
+  --danger-foreground: #ffffff;
+  --default: #f1f5f9;
 }
