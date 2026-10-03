@@ -11,6 +11,7 @@
     "build": "rm -rf dist tsconfig.tsbuildinfo && nest build",
     "start": "bun run dist/main.js",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
@@ -20,6 +21,7 @@
     "@nestjs/common": "^12.0.1",
     "@nestjs/core": "^12.0.1",
     "@nestjs/platform-express": "^12.0.1",
+    "dotenv": "^16",
     "js-yaml": "^5.4.2",
     "langchain": "^1.5.15",
     "reflect-metadata": "^0.2.2",
