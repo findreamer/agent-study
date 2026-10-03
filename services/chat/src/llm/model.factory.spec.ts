@@ -20,6 +20,6 @@ describe('createChatModel', () => {
     const model = createChatModel();
     expect(model).toBeInstanceOf(ChatOpenAI);
     expect(model.temperature).toBe(0);
-    expect(model.maxTokens).toBe(800);
+    expect(model.maxTokens).toBe(4000);
   });
 });

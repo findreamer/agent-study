@@ -4,9 +4,13 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { getApiKeys } from '../config/api-keys.js';
 import { createChatModel } from './model.factory.js';
+import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt.js';
+import { buildRequirementPrompt } from './requirement.prompt-builder.js';
 
-export const SYSTEM_PROMPT =
-  '你是需求结构化抽取助手，负责把用户输入的原始需求描述整理为结构清晰、要点完整的需求说明。';
+export interface PromptPreviewMessage {
+  role: string;
+  content: string;
+}
 
 @Injectable()
 export class LlmService {
@@ -20,7 +24,10 @@ export class LlmService {
   }
 
   buildMessages(input: string): [SystemMessage, HumanMessage] {
-    return [new SystemMessage(SYSTEM_PROMPT), new HumanMessage(input)];
+    return [
+      new SystemMessage(REQUIREMENT_SYSTEM_PROMPT),
+      new HumanMessage(input),
+    ];
   }
 
   async invoke(input: string): Promise<string> {
@@ -40,6 +47,22 @@ export class LlmService {
       inputs.map((input) => this.buildMessages(input)),
     );
     return responses.map((response) => LlmService.textOf(response.content));
+  }
+
+  async previewRequirementPrompt(
+    input: string,
+  ): Promise<PromptPreviewMessage[]> {
+    const messages = await buildRequirementPrompt().formatMessages({ input });
+    return messages.map((message) => ({
+      role: message.getType(),
+      content: LlmService.textOf(message.content),
+    }));
+  }
+
+  async invokeRequirementTemplate(input: string): Promise<string> {
+    const messages = await buildRequirementPrompt().formatMessages({ input });
+    const response = await this.chatModel().invoke(messages);
+    return LlmService.textOf(response.content);
   }
 
   private static textOf(content: BaseMessage['content']): string {

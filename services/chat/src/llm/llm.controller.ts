@@ -59,6 +59,20 @@ export class LlmController {
     return this.llm.batch(inputs).then((outputs) => ({ outputs }));
   }
 
+  @Post('prompt-preview')
+  promptPreview(@Body() body?: { input?: string }) {
+    return this.llm
+      .previewRequirementPrompt(this.readInput(body))
+      .then((messages) => ({ messages }));
+  }
+
+  @Post('prompt-to-model')
+  promptToModel(@Body() body?: { input?: string }) {
+    return this.llm
+      .invokeRequirementTemplate(this.readInput(body))
+      .then((output) => ({ output }));
+  }
+
   private readInput(body?: { input?: string }): string {
     const input = body?.input ?? DEFAULT_INPUT;
     if (typeof input !== 'string' || !input.trim()) {
