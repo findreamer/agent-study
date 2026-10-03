@@ -6,6 +6,7 @@ import { getApiKeys } from '../config/api-keys.js';
 import { createChatModel } from './model.factory.js';
 import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt.js';
 import { buildRequirementPrompt } from './requirement.prompt-builder.js';
+import { requirementChain } from './requirement.chain.js';
 
 export interface PromptPreviewMessage {
   role: string;
@@ -63,6 +64,23 @@ export class LlmService {
     const messages = await buildRequirementPrompt().formatMessages({ input });
     const response = await this.chatModel().invoke(messages);
     return LlmService.textOf(response.content);
+  }
+
+  async invokeChain(input: string): Promise<string> {
+    return requirementChain(this.chatModel()).invoke({ input });
+  }
+
+  async *streamChain(input: string): AsyncGenerator<string> {
+    const stream = await requirementChain(this.chatModel()).stream({ input });
+    for await (const delta of stream) {
+      yield delta;
+    }
+  }
+
+  async batchChain(inputs: string[]): Promise<string[]> {
+    return requirementChain(this.chatModel()).batch(
+      inputs.map((input) => ({ input })),
+    );
   }
 
   private static textOf(content: BaseMessage['content']): string {
