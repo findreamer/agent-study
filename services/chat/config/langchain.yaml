@@ -1,6 +1,6 @@
 llm:
   provider: openai
-  model: gpt-5.4
+  model: glm-4-flash        # 模型名，需与 .env 的 OPENAI_BASE_URL 配套更换
   temperature: 0
   maxTokens: 800
   timeoutMs: 30000
