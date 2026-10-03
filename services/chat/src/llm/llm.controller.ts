@@ -75,6 +75,16 @@ export class LlmController {
     return this.requirements.extract(this.readInput(body));
   }
 
+  @Post('tool-bind')
+  toolBind(@Body() body?: { input?: string }) {
+    return this.llm.bindToolsOnce(this.readInput(body));
+  }
+
+  @Post('tool-loop')
+  toolLoop(@Body() body?: { input?: string }) {
+    return this.llm.runToolLoop(this.readInput(body));
+  }
+
   private readInput(body?: { input?: string }): string {
     const input = body?.input ?? DEFAULT_INPUT;
     if (typeof input !== 'string' || !input.trim()) {

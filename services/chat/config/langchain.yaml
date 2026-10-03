@@ -1,8 +1,8 @@
 llm:
   provider: openai
-  model: ark-code-latest # 模型名，需与 .env 的 OPENAI_BASE_URL 配套更换
+  model: glm-5.3-flash # 模型名，需与 .env 的 OPENAI_BASE_URL 配套更换
   temperature: 0
-  maxTokens: 4000           # 思考型模型（ark-code-latest）需要覆盖 思考+正文 的预算
+  maxTokens: 4000 # 思考型模型（ark-code-latest）需要覆盖 思考+正文 的预算
   timeoutMs: 30000
 
 retrieval:
