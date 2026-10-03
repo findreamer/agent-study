@@ -16,6 +16,7 @@ export function createChatModel(): ChatOpenAI {
     temperature: llm.temperature,
     maxTokens: llm.maxTokens,
     timeout: llm.timeoutMs,
+    maxRetries: 0,
     apiKey: openAiApiKey,
     configuration: openAiBaseUrl ? { baseURL: openAiBaseUrl } : undefined,
   });
