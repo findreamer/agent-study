@@ -28,6 +28,13 @@ export class LlmService {
     return LlmService.textOf(response.content);
   }
 
+  async *stream(input: string): AsyncGenerator<string> {
+    const chunks = await this.chatModel().stream(this.buildMessages(input));
+    for await (const chunk of chunks) {
+      yield LlmService.textOf(chunk.content);
+    }
+  }
+
   private static textOf(content: BaseMessage['content']): string {
     return typeof content === 'string' ? content : JSON.stringify(content);
   }
