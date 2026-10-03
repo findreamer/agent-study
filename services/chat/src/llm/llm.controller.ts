@@ -10,6 +10,8 @@ import { LlmService } from './llm.service.js';
 
 export const DEFAULT_INPUT = '用户注册时必须绑定手机号，密码至少8位';
 
+const MAX_BATCH = 10;
+
 @Controller('api/langchain')
 export class LlmController {
   constructor(private readonly llm: LlmService) {}
@@ -41,6 +43,20 @@ export class LlmController {
     } finally {
       res.end();
     }
+  }
+
+  @Post('batch')
+  batch(@Body() body?: { inputs?: string[] }) {
+    const inputs = body?.inputs ?? [DEFAULT_INPUT];
+    if (
+      !Array.isArray(inputs) ||
+      inputs.length === 0 ||
+      inputs.length > MAX_BATCH ||
+      inputs.some((input) => typeof input !== 'string' || !input.trim())
+    ) {
+      throw new BadRequestException(`inputs 必须是 1~${MAX_BATCH} 条非空字符串`);
+    }
+    return this.llm.batch(inputs).then((outputs) => ({ outputs }));
   }
 
   private readInput(body?: { input?: string }): string {

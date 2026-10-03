@@ -35,6 +35,13 @@ export class LlmService {
     }
   }
 
+  async batch(inputs: string[]): Promise<string[]> {
+    const responses = await this.chatModel().batch(
+      inputs.map((input) => this.buildMessages(input)),
+    );
+    return responses.map((response) => LlmService.textOf(response.content));
+  }
+
   private static textOf(content: BaseMessage['content']): string {
     return typeof content === 'string' ? content : JSON.stringify(content);
   }
