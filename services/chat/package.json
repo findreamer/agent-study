@@ -7,9 +7,9 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
-    "dev": "nest start --watch",
-    "build": "rm -rf dist tsconfig.tsbuildinfo && nest build",
-    "start": "bun run dist/main.js",
+    "dev": "bun --watch src/main.ts",
+    "build": "bun build src/main.ts --target=bun --outdir=dist --packages=external",
+    "start": "bun run src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "lint": "tsc --noEmit"

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { LlmService } from './llm.service.js';
+import { RequirementService } from './requirement.service.js';
 
 export const DEFAULT_INPUT = '用户注册时必须绑定手机号，密码至少8位';
 
@@ -14,7 +15,10 @@ const MAX_BATCH = 10;
 
 @Controller('api/langchain')
 export class LlmController {
-  constructor(private readonly llm: LlmService) {}
+  constructor(
+    private readonly llm: LlmService,
+    private readonly requirements: RequirementService,
+  ) {}
 
   @Post('invoke')
   invoke(@Body() body?: { input?: string }) {
@@ -64,6 +68,11 @@ export class LlmController {
     return this.llm
       .batchChain(this.readInputs(body))
       .then((outputs) => ({ outputs }));
+  }
+
+  @Post('structured')
+  structured(@Body() body?: { input?: string }) {
+    return this.requirements.extract(this.readInput(body));
   }
 
   private readInput(body?: { input?: string }): string {

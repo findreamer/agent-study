@@ -1,5 +1,4 @@
-export const APP_NAME = "agent-study";
-
+export declare const APP_NAME = "agent-study";
 export * from "./enums";
 export * from "./common";
 export * from "./system";
