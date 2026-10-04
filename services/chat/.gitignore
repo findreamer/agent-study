@@ -3,6 +3,9 @@
 /node_modules
 /build
 
+# Prisma generated client（由 bun run db:generate 生成）
+/src/generated/
+
 # Logs
 logs
 *.log
