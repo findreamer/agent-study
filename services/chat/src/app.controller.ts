@@ -1,9 +1,13 @@
-import { Controller, Get } from '@nestjs/common';
+import { Body, Controller, Get, Post } from '@nestjs/common';
 import { AppService } from './app.service.js';
+import { RequirementService } from './llm/requirement.service.js';
 
 @Controller('api')
 export class AppController {
-  constructor(private readonly appService: AppService) {}
+  constructor(
+    private readonly appService: AppService,
+    private readonly requirements: RequirementService,
+  ) {}
 
   @Get('health')
   getHealth() {
@@ -14,5 +18,11 @@ export class AppController {
   @Get('hello')
   getHello() {
     return this.appService.getHello();
+  }
+
+  // 统一业务入口：需求结构化抽取
+  @Post('requirement/extract')
+  extractRequirement(@Body() body: { input: string }) {
+    return this.requirements.extract(body.input);
   }
 }

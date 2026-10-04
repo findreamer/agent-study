@@ -1,7 +1,15 @@
 import { tool, type StructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
 
-const VAGUE_WORDS = ['尽量', '大约', '尽快', '合适', '较好', '若干', '相关'] as const;
+const VAGUE_WORDS = [
+  '尽量',
+  '大约',
+  '尽快',
+  '合适',
+  '较好',
+  '若干',
+  '相关',
+] as const;
 
 const ENTITY_GLOSSARY: Record<string, string> = {
   用户: '系统的最终操作者，通过注册流程获得账号',
