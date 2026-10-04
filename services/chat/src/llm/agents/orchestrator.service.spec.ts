@@ -144,4 +144,23 @@ describe('AgentOrchestratorService', () => {
     expect(result.usedAgents).toEqual([]);
     expect(result.steps.at(-1)).toMatchObject({ agent: 'extract', ok: false });
   });
+
+  it('汇总返回空输出时按失败兜底，不静默透传空报告', async () => {
+    const service = makeService(
+      {
+        '需求抽取 Agent': EXTRACT_JSON,
+        '澄清判断 Agent': '{"needsClarification":false,"questions":[]}',
+        '需求分析 Agent': '## 功能分解\n- 多轮澄清',
+        '风险评估 Agent': '## 技术风险\n- 无',
+        '报告汇总 Agent': '   ',
+      },
+    );
+
+    const result = await service.orchestrate('开发一个会话记忆系统');
+
+    expect(result.status).toBe('failed');
+    expect(result.fallback).toBe('manual_review');
+    expect(result.report).toBeNull();
+    expect(result.steps.at(-1)).toMatchObject({ agent: 'summary', ok: false });
+  });
 });

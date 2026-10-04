@@ -167,6 +167,10 @@ export class AgentOrchestratorService {
     const start = Date.now();
     try {
       const output = await run();
+      // 思考型模型推理耗尽 maxTokens 时会返回空正文，必须按失败兜底而非静默透传
+      if (output === null || output === undefined || (typeof output === 'string' && !output.trim())) {
+        throw new Error(`${agent} 返回空输出（可能是推理预算耗尽或上游异常）`);
+      }
       steps.push({
         agent,
         ok: true,

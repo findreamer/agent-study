@@ -1,6 +1,7 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createChatModel } from './model.factory.js';
+import { loadLangchainConfig } from '../config/load-langchain-config.js';
 
 describe('createChatModel', () => {
   const originalKey = process.env.OPENAI_API_KEY;
@@ -18,8 +19,9 @@ describe('createChatModel', () => {
   it('按 YAML 参数创建 ChatOpenAI 实例', () => {
     process.env.OPENAI_API_KEY = 'test-key';
     const model = createChatModel();
+    const config = loadLangchainConfig();
     expect(model).toBeInstanceOf(ChatOpenAI);
-    expect(model.temperature).toBe(0);
-    expect(model.maxTokens).toBe(4000);
+    expect(model.temperature).toBe(config.llm.temperature);
+    expect(model.maxTokens).toBe(config.llm.maxTokens);
   });
 });
