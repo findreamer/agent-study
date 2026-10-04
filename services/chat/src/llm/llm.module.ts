@@ -6,10 +6,27 @@ import { MemoryController } from './memory/memory.controller.js';
 import { RunnableMemoryService } from './memory/runnable-memory.service.js';
 import { FilesController } from './filesystem/files.controller.js';
 import { FilesystemService } from './filesystem/filesystem.service.js';
+import { XenovaEmbeddings } from './embedding/embedding.service.js';
+import { VectorStoreService } from './embedding/vector-store.service.js';
+import { EmbeddingController } from './embedding/embedding.controller.js';
 
 @Module({
-  controllers: [LlmController, MemoryController, FilesController],
-  providers: [LlmService, RequirementService, RunnableMemoryService, FilesystemService],
-  exports: [LlmService, RequirementService, RunnableMemoryService, FilesystemService],
+  controllers: [LlmController, MemoryController, FilesController, EmbeddingController],
+  providers: [
+    LlmService,
+    RequirementService,
+    RunnableMemoryService,
+    FilesystemService,
+    XenovaEmbeddings,
+    VectorStoreService,
+  ],
+  exports: [
+    LlmService,
+    RequirementService,
+    RunnableMemoryService,
+    FilesystemService,
+    XenovaEmbeddings,
+    VectorStoreService,
+  ],
 })
 export class LlmModule {}
