@@ -4,10 +4,12 @@ import { LlmService } from './llm.service.js';
 import { RequirementService } from './requirement.service.js';
 import { MemoryController } from './memory/memory.controller.js';
 import { RunnableMemoryService } from './memory/runnable-memory.service.js';
+import { FilesController } from './filesystem/files.controller.js';
+import { FilesystemService } from './filesystem/filesystem.service.js';
 
 @Module({
-  controllers: [LlmController, MemoryController],
-  providers: [LlmService, RequirementService, RunnableMemoryService],
-  exports: [LlmService, RequirementService, RunnableMemoryService],
+  controllers: [LlmController, MemoryController, FilesController],
+  providers: [LlmService, RequirementService, RunnableMemoryService, FilesystemService],
+  exports: [LlmService, RequirementService, RunnableMemoryService, FilesystemService],
 })
 export class LlmModule {}

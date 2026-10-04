@@ -1,28 +1,17 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import type { ChatOpenAI } from '@langchain/openai';
-import {
-  HumanMessage,
-  SystemMessage,
-  ToolMessage,
-} from '@langchain/core/messages';
-import type { BaseMessage } from '@langchain/core/messages';
+import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { getApiKeys } from '../config/api-keys.js';
 import { createChatModel } from './model.factory.js';
 import { REQUIREMENT_SYSTEM_PROMPT } from './prompts/requirement.prompt.js';
 import { buildRequirementPrompt } from './requirement.prompt-builder.js';
 import { requirementChain } from './requirement.chain.js';
 import { basicTools, basicToolsByName } from './tools/basic.tools.js';
+import { runToolLoop, type ToolLoopResult } from './tools/tool-loop.js';
+import { textOf } from './messages/text.js';
 
 const TOOL_USAGE_HINT =
   '\n你可以先调用提供的工具校验约束、查询实体定义，再输出最终的需求说明。';
-
-const MAX_TOOL_ROUNDS = 3;
-
-export interface ToolCallTrace {
-  tool: string;
-  args: Record<string, unknown>;
-  result: string;
-}
 
 export interface PromptPreviewMessage {
   role: string;
@@ -49,13 +38,13 @@ export class LlmService {
 
   async invoke(input: string): Promise<string> {
     const response = await this.chatModel().invoke(this.buildMessages(input));
-    return LlmService.textOf(response.content);
+    return textOf(response.content);
   }
 
   async *stream(input: string): AsyncGenerator<string> {
     const chunks = await this.chatModel().stream(this.buildMessages(input));
     for await (const chunk of chunks) {
-      yield LlmService.textOf(chunk.content);
+      yield textOf(chunk.content);
     }
   }
 
@@ -63,7 +52,7 @@ export class LlmService {
     const responses = await this.chatModel().batch(
       inputs.map((input) => this.buildMessages(input)),
     );
-    return responses.map((response) => LlmService.textOf(response.content));
+    return responses.map((response) => textOf(response.content));
   }
 
   async previewRequirementPrompt(
@@ -72,14 +61,14 @@ export class LlmService {
     const messages = await buildRequirementPrompt().formatMessages({ input });
     return messages.map((message) => ({
       role: message.getType(),
-      content: LlmService.textOf(message.content),
+      content: textOf(message.content),
     }));
   }
 
   async invokeRequirementTemplate(input: string): Promise<string> {
     const messages = await buildRequirementPrompt().formatMessages({ input });
     const response = await this.chatModel().invoke(messages);
-    return LlmService.textOf(response.content);
+    return textOf(response.content);
   }
 
   async invokeChain(input: string): Promise<string> {
@@ -117,39 +106,16 @@ export class LlmService {
         })),
       };
     }
-    return { kind: 'text', output: LlmService.textOf(response.content) };
+    return { kind: 'text', output: textOf(response.content) };
   }
 
-  async runToolLoop(
-    input: string,
-  ): Promise<{ output: string; steps: ToolCallTrace[] }> {
-    const messages: BaseMessage[] = this.buildToolMessages(input);
-    const steps: ToolCallTrace[] = [];
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const response = await this.chatModel()
-        .bindTools(basicTools)
-        .invoke(messages);
-      messages.push(response);
-      if (!response.tool_calls?.length) {
-        return { output: LlmService.textOf(response.content), steps };
-      }
-      for (const call of response.tool_calls) {
-        const selected = basicToolsByName[call.name];
-        const result = selected
-          ? String(await selected.invoke(call.args as never))
-          : `未知工具：${call.name}`;
-        steps.push({ tool: call.name, args: call.args, result });
-        messages.push(
-          new ToolMessage({
-            content: result,
-            name: call.name,
-            tool_call_id: call.id ?? '',
-          }),
-        );
-      }
-    }
-    const final = await this.chatModel().invoke(messages);
-    return { output: LlmService.textOf(final.content), steps };
+  async runToolLoop(input: string): Promise<ToolLoopResult> {
+    return runToolLoop({
+      model: this.chatModel(),
+      messages: this.buildToolMessages(input),
+      tools: basicTools,
+      toolsByName: basicToolsByName,
+    });
   }
 
   private buildToolMessages(input: string): [SystemMessage, HumanMessage] {
@@ -157,9 +123,5 @@ export class LlmService {
       new SystemMessage(`${REQUIREMENT_SYSTEM_PROMPT}${TOOL_USAGE_HINT}`),
       new HumanMessage(input),
     ];
-  }
-
-  private static textOf(content: BaseMessage['content']): string {
-    return typeof content === 'string' ? content : JSON.stringify(content);
   }
 }
