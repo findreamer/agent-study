@@ -9,9 +9,11 @@ import { FilesystemService } from './filesystem/filesystem.service.js';
 import { XenovaEmbeddings } from './embedding/embedding.service.js';
 import { VectorStoreService } from './embedding/vector-store.service.js';
 import { EmbeddingController } from './embedding/embedding.controller.js';
+import { AgentsController } from './agents/agents.controller.js';
+import { AgentOrchestratorService } from './agents/orchestrator.service.js';
 
 @Module({
-  controllers: [LlmController, MemoryController, FilesController, EmbeddingController],
+  controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController],
   providers: [
     LlmService,
     RequirementService,
@@ -19,6 +21,7 @@ import { EmbeddingController } from './embedding/embedding.controller.js';
     FilesystemService,
     XenovaEmbeddings,
     VectorStoreService,
+    AgentOrchestratorService,
   ],
   exports: [
     LlmService,
@@ -27,6 +30,7 @@ import { EmbeddingController } from './embedding/embedding.controller.js';
     FilesystemService,
     XenovaEmbeddings,
     VectorStoreService,
+    AgentOrchestratorService,
   ],
 })
 export class LlmModule {}

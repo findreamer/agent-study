@@ -2,8 +2,8 @@ llm:
   provider: openai
   model: glm-5.3-flash # 模型名，需与 .env 的 OPENAI_BASE_URL 配套更换
   temperature: 0
-  maxTokens: 4000 # 思考型模型（ark-code-latest）需要覆盖 思考+正文 的预算
-  timeoutMs: 60000          # 思考型模型首轮开放式提问可能超 30s，放宽到 60s
+  maxTokens: 8000 # 思考型模型需要覆盖 思考+正文 的预算；汇总 Agent 输入长、推理多，4000 会被推理耗尽
+  timeoutMs: 120000         # 多 Agent 编排中汇总环节要吃进分析+风控长文，60s 会超时
 
 retrieval:
   enabled: true
