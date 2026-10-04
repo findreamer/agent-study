@@ -102,9 +102,63 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
 
 ---
 
-## 阶段 2：会话持久化（待开始）
+## 阶段 2：会话持久化 + 用户鉴权（已完成 2026-10-04）
 
-> 计划：`RunnableMemoryService` 底座换成 messages 表——实现 `BaseListChatMessageHistory` 的 DB 版本（getMessages/addMessages），conversation 按 (userId, conversationId) 归属校验；对外 API（chat/getHistory/appendMessage/clearSession）不变；验证「重启服务历史不丢」。
+### 实现 Prompt（原文）
+
+> 在 services/chat 的 LangChain 层中，用 PostgreSQL 替换 InMemoryChatMessageHistory，严格按以下要求执行：
+>
+> 1. 会话服务（services/chat/src/conversation/conversation.service.ts）：
+>    - create(userId, title?) / findByUser(userId) / findById(conversationId, userId)（含权限校验）/ delete(conversationId, userId)
+> 2. 消息服务（services/chat/src/message/message.service.ts）：
+>    - addMessage(conversationId, role, content, metadata?)
+>    - getHistory(conversationId, limit?)
+>    - getHistoryAsLangChainMessages(conversationId)：转换为 LangChain BaseMessage 数组
+> 3. 自定义 ChatMessageHistory（services/chat/src/message/db-chat-history.ts）：
+>    - 继承 BaseListChatMessageHistory，内部调用 MessageService 读写 messages 表
+>    - 与 RunnableWithMessageHistory 兼容
+> 4. 新增路由（@Controller('api/conversations')，全部经 JwtAuthGuard）：
+>    - POST /：创建会话；GET /：当前用户会话列表；GET /:id/messages：会话消息历史；POST /:id/chat：在指定会话中发送消息；DELETE /:id：删除会话
+
+### 关键设计与核心片段
+
+**DB 版 ChatMessageHistory**（与 `RunnableWithMessageHistory` 对接的关键只有两点：继承 `BaseListChatMessageHistory`、实现 `getMessages/addMessage`）：
+
+```ts
+export class DbChatMessageHistory extends BaseListChatMessageHistory {
+  lc_namespace = ['langchain', 'chat_history', 'db'];
+  constructor(private readonly conversationId: string, private readonly messages: MessageService) { super(); }
+
+  async addMessage(message: BaseMessage): Promise<void> {
+    const role = message.getType() === 'human' ? MessageRole.USER
+               : message.getType() === 'ai' ? MessageRole.ASSISTANT : null;
+    if (!role) throw new Error(`不支持的消息类型：${message.getType()}`);
+    await this.messages.addMessage(this.conversationId, role, String(message.content));
+  }
+  async getMessages(): Promise<BaseMessage[]> {
+    return this.messages.getHistoryAsLangChainMessages(this.conversationId);
+  }
+}
+```
+
+**自动落库**：`RunnableWithMessageHistory` 会把 `inputMessagesKey` 对应的输入写为 HumanMessage、最终输出写为 AIMessage——服务代码里没有任何手写"保存消息"，持久化是历史机制自带的副作用。
+
+**会话内对话流**（`ConversationChatService`）：`prompt(system=MEMORY_SYSTEM_PROMPT + history placeholder).pipe(createChatModel()).pipe(StringOutputParser)`，`getMessageHistory: async () => new DbChatMessageHistory(conversationId, messageService)`。
+
+**鉴权**（提前自阶段 5）：`JwtAuthGuard` 对 user-system 签发的 access token 本地验签（HS256 + 共享 JWT_SECRET，取 `payload.sub` 作 userId 挂 `req.user`），不调用 user-system、不签发 token；`@UseGuards(JwtAuthGuard)` 类引用的守卫在**消费模块**里实例化，故 `JwtModule.register({ global: true })`。
+
+**Nest DI 陷阱实录**：服务里 `import type { PrismaService }` 会让 `emitDecoratorMetadata` 在运行时拿不到类型，DI 报 "argument at index [0] is available"——被装饰器注入的类必须值导入。
+
+**归属校验**：findById 校验 `conversation.userId !== userId` 时抛 404（不是 403），避免泄露会话存在性。
+
+### 验证记录（2026-10-04，真实链路）
+
+- user-system 登录（`POST /api/auth/login`，种子 admin）→ access token（277 字符）
+- `POST /api/conversations`（无 token → 401；带 token → 创建成功）
+- 第一轮 chat 真实 LLM → messages 表 2 条；**重启服务后 GET messages 仍 2 条**（持久化核心验收）
+- 第二轮 chat 回复明确引用第一轮给出的「产品方向 A/B/C」→ DB 历史确实进入提示词
+- 会话列表含 `_count.messages`；`DELETE` 后再查历史 404（级联删除）
+- 单测 106/106（新增 21：三服务 16 + 守卫 5），typecheck 通过
 
 ## 阶段 3：文档上传与向量化 Pipeline（待开始）
 
