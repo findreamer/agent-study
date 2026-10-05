@@ -18,7 +18,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthUser } from '../auth/jwt-auth.guard.js';
 import { DocumentService, isAllowedFile, MAX_FILE_SIZE } from './document.service.js';
-import { DocumentProcessService } from './document-process.service.js';
+import { ChunkService } from './chunk.service.js';
 
 @UseGuards(JwtAuthGuard)
 @Controller('api/documents')
@@ -27,7 +27,7 @@ export class DocumentController {
 
   constructor(
     private readonly documents: DocumentService,
-    private readonly processService: DocumentProcessService,
+    private readonly chunkService: ChunkService,
   ) {}
 
   @Post('upload')
@@ -67,7 +67,7 @@ export class DocumentController {
   async process(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const document = await this.documents.findById(id, user.userId);
     // fire-and-forget：成败都记录在 documents.status 与 task_events
-    void this.processService.process(id, user.userId).catch((error: unknown) => {
+    void this.chunkService.processDocument(id, user.userId).catch((error: unknown) => {
       this.logger.error(
         `文档 ${id} 异步处理失败：${error instanceof Error ? error.message : String(error)}`,
       );

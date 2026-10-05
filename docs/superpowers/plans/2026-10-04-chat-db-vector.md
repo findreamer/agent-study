@@ -219,9 +219,59 @@ await this.prisma.$executeRaw`
 - DELETE → 记录删除、document_chunks 级联清零、物理文件移除；再查详情 404
 - 单测 116/116（新增 10：service 7 + process 3，FakeEmbeddings 注入测管道），typecheck 通过
 
-## 阶段 4：pgvector 检索 + SSE 任务通知（待开始）
+## 阶段 4：pgvector 检索 + SSE 任务通知（检索已完成 2026-10-05，SSE 待开始）
 
-> 计划：`$queryRaw` 余弦相似度检索（`embedding <=> $query::vector`，join documents 按 userId 隔离）；SSE 推送任务进度（复用手写 SSE），事件先落 task_events 再广播，断线重连可回放未读事件（readAt）。
+### 实现 Prompt（原文 · pgvector 检索部分）
+
+> 接下来我们进一步细化，并用 pgvector 替换第四章中的 MemoryVectorStore，使向量数据能够持久化保存和检索。
+>
+> 在 services/chat 中实现向量化落库，严格按以下要求执行：
+>
+> 1. 向量化服务（services/chat/src/document/embedding.service.ts）：
+>    - 复用第四章 @xenova/transformers（Xenova/paraphrase-multilingual-MiniLM-L12-v2）
+>    - embedTexts(texts)：mean pooling + L2 单位化，返回 384 维向量
+>
+> 2. 完整 Pipeline（chunk.service.ts 的 processDocument）：
+>    - 解析 → 分块 → embedTexts → 用 raw SQL 写入 document_chunks.embedding（vector）
+>    - 更新 documents.status 与 chunkCount
+>
+> 3. 语义检索（services/chat/src/document/search.service.ts）：
+>    - similaritySearch(query, userId, topK)：query 向量化 → pgvector <=> 余弦距离
+>    - JOIN documents 过滤 userId（用户隔离）→ 返回 topK（content + score）
+>
+> 4. 新增路由：POST /api/search（@Controller('api/search')，经 JwtAuthGuard）
+
+### 关键设计与核心片段
+
+**MemoryVectorStore 的替代关系**：第四章 demo 路由（`api/embedding`）保留 MemoryVectorStore 不动；生产链路的上传→向量化→检索全部改走 pgvector——向量随 document_chunks 持久化，重启可检索、可按用户隔离。
+
+**DocumentEmbeddingService**（document 域的 embedTexts 入口）：委托注入的第四章 `XenovaEmbeddings` 单例（`embedDocuments` 内部即 mean pooling + `normalize: true` = L2 单位化，输出 384 维），不新建模型实例，避免二次加载。
+
+**管道归位 ChunkService.processDocument**：上一阶段的 document-process.service 按任务书重构为 chunk.service.ts，逻辑不变（202 异步、task_events、状态机、`$executeRaw` + `::vector` 参数化写入）。
+
+**语义检索核心 SQL**（`$queryRaw`，vector 列 Prisma 只读）：
+
+```sql
+SELECT c.content,
+       1 - (c.embedding <=> ${literal}::vector) AS score
+FROM document_chunks c
+JOIN documents d ON d.id = c."documentId"
+WHERE d."userId" = ${userId}
+ORDER BY c.embedding <=> ${literal}::vector
+LIMIT ${topK}
+```
+
+`<=>` 是余弦距离（0~2），score = 1 - 距离转回相似度语义；userId 过滤放在 JOIN 的 documents 上，一次查询同时完成隔离与检索。
+
+**路由**：`POST /api/search`，body `{ query, topK? }`（topK 默认 5，1~20 校验），返回 `{ query, topK, results: [{ content, score }] }`。
+
+### 验证记录（2026-10-05，真实链路）
+
+- requirement-spec.md process → done（1 块落库，`vector_dims` = 384）
+- 检索「会话历史在服务重启后会不会丢失」「分析任务由哪些智能体协作完成」→ 命中需求文档片段，score 0.19~0.47；无关查询「今天中午吃什么」score 显著回落（0.07~0.18）——语义区分度成立
+- topK=99 → 400；无 token → 401
+- 期间一次真实故障：重构中间态被 bun --watch 热重启撞上（controller 引用旧类名）导致进程退出，代码一致后重启即恢复
+- 单测 119/119（新增 3 个检索测试 + 管道测试迁移适配），typecheck 通过
 
 ## 阶段 5：统一调用链路（待开始）
 

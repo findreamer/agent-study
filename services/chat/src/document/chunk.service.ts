@@ -1,14 +1,13 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
-import type { Embeddings } from '@langchain/core/embeddings';
-import { PrismaService } from '../prisma/prisma.service.js';
 import { Prisma } from '../generated/prisma/client.js';
-import { XenovaEmbeddings } from '../llm/embedding/embedding.service.js';
+import { PrismaService } from '../prisma/prisma.service.js';
+import { DocumentEmbeddingService } from './embedding.service.js';
 import { uploadsRoot } from './document.service.js';
 
 const CHUNK_SIZE = 800;
@@ -16,8 +15,8 @@ const CHUNK_OVERLAP = 100;
 const EMBED_BATCH_SIZE = 16;
 
 @Injectable()
-export class DocumentProcessService {
-  private readonly logger = new Logger(DocumentProcessService.name);
+export class ChunkService {
+  private readonly logger = new Logger(ChunkService.name);
   private readonly splitter = new RecursiveCharacterTextSplitter({
     chunkSize: CHUNK_SIZE,
     chunkOverlap: CHUNK_OVERLAP,
@@ -25,16 +24,15 @@ export class DocumentProcessService {
 
   constructor(
     private readonly prisma: PrismaService,
-    // token 指向具体 provider，参数类型保持抽象以便测试注入 FakeEmbeddings
-    @Inject(XenovaEmbeddings) private readonly embeddings: Embeddings,
+    private readonly embeddings: DocumentEmbeddingService,
   ) {}
 
   /**
-   * 解析 → 分块 → 向量化 → 落库 完整管道。
+   * 完整管道：解析 → 分块 → embedTexts 向量化 → raw SQL 写 document_chunks.embedding。
    * 由 Controller 以 202 触发、fire-and-forget 调用；
    * 无论成败都把进度写入 task_events，并把 documents.status 推到 done/error。
    */
-  async process(documentId: string, userId: string): Promise<void> {
+  async processDocument(documentId: string, userId: string): Promise<void> {
     const doc = await this.prisma.document.findUnique({
       where: { id: documentId },
     });
@@ -60,7 +58,7 @@ export class DocumentProcessService {
 
       for (let start = 0; start < chunks.length; start += EMBED_BATCH_SIZE) {
         const batch = chunks.slice(start, start + EMBED_BATCH_SIZE);
-        const vectors = await this.embeddings.embedDocuments(batch);
+        const vectors = await this.embeddings.embedTexts(batch);
         for (let i = 0; i < batch.length; i++) {
           await this.insertChunk(documentId, start + i, batch[i]!, vectors[i]);
         }
