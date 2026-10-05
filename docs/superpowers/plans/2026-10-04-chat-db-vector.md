@@ -160,9 +160,64 @@ export class DbChatMessageHistory extends BaseListChatMessageHistory {
 - 会话列表含 `_count.messages`；`DELETE` 后再查历史 404（级联删除）
 - 单测 106/106（新增 21：三服务 16 + 守卫 5），typecheck 通过
 
-## 阶段 3：文档上传与向量化 Pipeline（待开始）
+## 阶段 3：文档上传与向量化 Pipeline（已完成 2026-10-05）
 
-> 计划：multer 内存存储上传（PDF/TXT/MD/DOCX；pdf-parse / mammoth 解析）→ RecursiveCharacterTextSplitter 分块 → XenovaEmbeddings 向量化 → document_chunks `$executeRaw` 写入；documents.status 状态机 pending→processing→done/error；任务进度事件写 task_events。
+### 实现 Prompt（原文）
+
+> 在 services/chat 中实现文件上传功能，严格按以下要求执行：
+>
+> 1. 安装依赖：@nestjs/platform-express、multer、@types/multer
+>
+> 2. 文件上传服务（services/chat/src/document/document.service.ts）：
+>    - upload(userId, file, filename)：保存到 uploads/{userId}/{timestamp}-{name}，元数据写入 documents 表（status: pending）
+>    - findByUser(userId) / findById(documentId, userId)（权限校验）/ delete(documentId, userId)（含物理文件）
+>    - 允许类型：text/plain, text/markdown, text/x-markdown, application/pdf, docx/msword
+>    - 文件大小限制：10MB
+>
+> 3. 新增路由（@Controller('api/documents')，经 JwtAuthGuard）：
+>    - POST /upload（multipart/form-data，内存存储 + fileFilter）
+>    - POST /:id/process：触发解析+分块+向量化（异步，返回 202）
+>    - GET / ：文档列表；GET /:id：详情；DELETE /:id
+
+### 关键设计与核心片段
+
+**模块划分**：`document.service.ts` 只做 CRUD（任务书范围），管道独立为 `document-process.service.ts`；`DocumentModule` 复用 `AuthModule`（守卫）与 `LlmModule` 的 `XenovaEmbeddings` 单例（不重复注册，否则模型加载一次变两次）。
+
+**filePath 存相对路径**：落库存 `path.join(userId, storedName)`（相对 `uploadsRoot()`），读取/删除时再 `path.resolve(uploadsRoot(), filePath)`——对 cwd 漂移与容器部署都稳定，也不会在 tmp 目录测试时产生 `../..` 泄漏。文件名用 `path.basename` 拦截路径穿越。
+
+**fileFilter 双重白名单**：MIME 清单放行 txt/md/pdf/msword/docx（docx 实际 MIME 是 `application/vnd...wordprocessingml.document`）；对 `application/octet-stream` 按扩展名兜底（部分客户端不按规范发 MIME）。`limits.fileSize = 10MB` 由 multer 在内存存储层拦截。
+
+**异步管道**（`POST /:id/process` 返回 202）：
+
+```ts
+void this.processService.process(id, user.userId).catch((error) => this.logger.error(...));
+return { documentId: id, status: 'processing' };
+```
+
+成败都不走 HTTP——状态机推到 `documents.status`（pending→processing→done/error），进度写 `task_events`（taskType=document_process, taskId=文档 id），为阶段 4 的 SSE 广播备好事件源。
+
+**向量落库**（Prisma 对 `Unsupported("vector")` 只读，必须 `$executeRaw`）：
+
+```ts
+const literal = vector ? `[${vector.join(',')}]` : null;
+await this.prisma.$executeRaw`
+  INSERT INTO document_chunks (id, "documentId", content, "chunkIndex", embedding, "createdAt")
+  VALUES (${randomUUID()}, ${documentId}, ${content}, ${chunkIndex}, ${literal}::vector, now())
+`;
+```
+
+列名是 Prisma 字段原样（camelCase，SQL 需引号）；向量以 `'[...]'` 字符串参数化传入再 `::vector` 转换，避免注入。id 在 JS 侧 `randomUUID()`（raw INSERT 吃不到 `@default(cuid())`）。
+
+**解析路由**：`text/*` 直接 utf8；`application/pdf` 用 pdf-parse v2（`new PDFParse({ data }).getText()`，用完 `destroy()`）；docx 用 mammoth `extractRawText`（仅支持 .docx，旧版二进制 .doc 会抛错走 error 事件——上传允许、处理报错，行为如实）。分块 `RecursiveCharacterTextSplitter({ chunkSize: 800, chunkOverlap: 100 })`，嵌入按 16 条/批调用 `embedDocuments`。重复 process 先 `deleteMany` 旧分块。
+
+### 验证记录（2026-10-05，真实链路）
+
+- 无 token 上传 → 401；`.sh` 文件 → 400 fileFilter 拒绝；md/txt/pdf → 201，文件落在 `uploads/{userId}/{timestamp}-{name}`
+- `POST /:id/process` → 202；轮询详情 pending→processing→done
+- 修复一次真实 bug：process 侧按 cwd 解析 filePath 导致 ENOENT——错误路径正好验证了兜底（status=error + task_events 写入「处理失败：ENOENT...」）
+- psql 验收：long.txt（40 行中文）分 4 块、sample.pdf 解析 1 块，全部 384 维向量（`vector_dims`）；task_events 顺序 processing→error→processing→done
+- DELETE → 记录删除、document_chunks 级联清零、物理文件移除；再查详情 404
+- 单测 116/116（新增 10：service 7 + process 3，FakeEmbeddings 注入测管道），typecheck 通过
 
 ## 阶段 4：pgvector 检索 + SSE 任务通知（待开始）
 
