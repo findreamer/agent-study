@@ -219,7 +219,7 @@ await this.prisma.$executeRaw`
 - DELETE → 记录删除、document_chunks 级联清零、物理文件移除；再查详情 404
 - 单测 116/116（新增 10：service 7 + process 3，FakeEmbeddings 注入测管道），typecheck 通过
 
-## 阶段 4：pgvector 检索 + SSE 任务通知（检索已完成 2026-10-05，SSE 待开始）
+## 阶段 4：pgvector 检索 + SSE 任务通知（已完成 2026-10-06）
 
 ### 实现 Prompt（原文 · pgvector 检索部分）
 
@@ -272,6 +272,48 @@ LIMIT ${topK}
 - topK=99 → 400；无 token → 401
 - 期间一次真实故障：重构中间态被 bun --watch 热重启撞上（controller 引用旧类名）导致进程退出，代码一致后重启即恢复
 - 单测 119/119（新增 3 个检索测试 + 管道测试迁移适配），typecheck 通过
+
+### 实现 Prompt（原文 · SSE 任务通知部分）
+
+> 在 services/chat 中实现 SSE 任务推送机制，严格按以下要求执行：
+>
+> 1. SseService（services/chat/src/sse/sse.service.ts）：
+>    - 维护 Map<userId, Set<Response>>（一个用户多 Tab 共用）
+>    - addConnection(userId, res) / removeConnection(userId, res)
+>    - emit(userId, event)：先持久化到 task_events 表，再实时推送给在线连接
+>    - 用 @nestjs/schedule 定期清理离线 entry 与 30 天前的 task_events
+>
+> 2. SseController（@Controller('api/sse')，经 JwtAuthGuard）：
+>    - GET /tasks：text/event-stream，注册连接 + 心跳，断开时清理
+>
+> 3. TaskEventController（@Controller('api/tasks')）：
+>    - GET /history：分页查询任务历史；GET /:taskId；PATCH /:taskId/read
+>
+> 4. ChunkService.processDocument 在开始/完成/失败时 emit 对应状态事件
+
+### 关键设计与核心片段（SSE）
+
+**事件出口收敛到 SseService**：chunk.service 原来只落库的 `emitEvent`（taskEvent.create）上移为 `sse.emit(userId, event)`——**先 `task_events.create`，再 `broadcast` 给该用户所有在线连接**。无在线连接时只落库不报错；`task_events` 由此成为唯一事件源，实时推送只是它的缓存视图。
+
+**断线回放 + 已读确认**（readAt）：
+
+- `GET /api/sse/tasks` 连接建立后先查 `unreadEvents`（`readAt: null`，按 createdAt 正序，上限 100）回放，再交由实时推送——断线期间 emit 落库的事件重连即补发；客户端按事件 `id` 去重
+- `PATCH /api/tasks/:taskId/read` 把该任务的未读事件批量置 `readAt`，确认后不再回放
+- SSE 帧统一 `event: task` + `data: JSON`（含 id/taskType/taskId/status/message/metadata/createdAt），落库与推送共用同一 `formatEvent`
+
+**连接生命周期**（复用 llm.controller 手写 SSE 模式）：`Map<userId, Set<Response>>` 支持多 Tab；`@Res()` 手写响应头 + `flushHeaders`，`req.on('close')`/`res.on('close')` 双保险清理注册；15s 心跳注释行（`: heartbeat`）保活。
+
+**@nestjs/schedule 定时任务**：`ScheduleModule.forRoot()` 注册进 AppModule；`@Interval(60s)` 清理 `writableEnded/destroyed` 的僵尸连接与空 entry；`@Cron(EVERY_DAY_AT_3AM)` 删除 30 天前的 task_events。
+
+**TaskEventController**（`api/tasks`，同样经 JwtAuthGuard——任务书未写但隔离必须）：`GET /history` 事务并行取分页 + total（page/pageSize 校验，pageSize ≤ 100）；`GET /:taskId` 返回该任务完整事件时间线；`PATCH /:taskId/read` 返回 `{ taskId, updated }`，count=0 时区分「已全部已读」与「任务不存在（404）」。
+
+### 验证记录（2026-10-06，真实链路）
+
+- SSE 流验证：连接建立后回放全部未读历史事件（含 10-05 的 processing→error→done 序列）；触发 requirement-spec.md 重处理，`processing`（03:19:24）→ `done`（03:19:25，metadata.chunkCount=1）实时推达
+- `GET /api/tasks/history?page=1&pageSize=3` 分页正确；`GET /api/tasks/:taskId` 返回 4 条时间线；`PATCH /:taskId/read` → `{updated: 4}`，重复读 → `{updated: 0}`
+- 已读后重连：该 taskId 事件不再回放；17s 连接内收到 1 条心跳；无 token → 401（SSE 与 tasks 均是）
+- 单测 130/130（新增 sse.service 6 例、task-event/sse controller 5 例，chunk 测试改为断言 `sse.emit`），typecheck 通过
+- 期间机器重启导致 Docker 守护进程丢失：重新拉起 Docker Desktop + postgres 容器后恢复
 
 ## 阶段 5：统一调用链路（待开始）
 

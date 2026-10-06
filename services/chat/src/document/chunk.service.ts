@@ -5,8 +5,8 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import mammoth from 'mammoth';
 import { PDFParse } from 'pdf-parse';
 import { RecursiveCharacterTextSplitter } from '@langchain/textsplitters';
-import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SseService } from '../sse/sse.service.js';
 import { DocumentEmbeddingService } from './embedding.service.js';
 import { uploadsRoot } from './document.service.js';
 
@@ -25,12 +25,14 @@ export class ChunkService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly embeddings: DocumentEmbeddingService,
+    private readonly sse: SseService,
   ) {}
 
   /**
    * 完整管道：解析 → 分块 → embedTexts 向量化 → raw SQL 写 document_chunks.embedding。
    * 由 Controller 以 202 触发、fire-and-forget 调用；
-   * 无论成败都把进度写入 task_events，并把 documents.status 推到 done/error。
+   * 无论成败都经 SseService 记录进度事件（先落 task_events 再实时推送），
+   * 并把 documents.status 推到 done/error。
    */
   async processDocument(documentId: string, userId: string): Promise<void> {
     const doc = await this.prisma.document.findUnique({
@@ -44,7 +46,12 @@ export class ChunkService {
       where: { id: documentId },
       data: { status: 'processing' },
     });
-    await this.emitEvent(userId, documentId, 'processing', '开始解析与向量化');
+    await this.sse.emit(userId, {
+      taskType: 'document_process',
+      taskId: documentId,
+      status: 'processing',
+      message: '开始解析与向量化',
+    });
 
     try {
       const text = await this.parseToText(doc.filePath, doc.mimeType);
@@ -68,8 +75,12 @@ export class ChunkService {
         where: { id: documentId },
         data: { status: 'done', chunkCount: chunks.length },
       });
-      await this.emitEvent(userId, documentId, 'done', `向量化完成，共 ${chunks.length} 块`, {
-        chunkCount: chunks.length,
+      await this.sse.emit(userId, {
+        taskType: 'document_process',
+        taskId: documentId,
+        status: 'done',
+        message: `向量化完成，共 ${chunks.length} 块`,
+        metadata: { chunkCount: chunks.length },
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -78,7 +89,12 @@ export class ChunkService {
         where: { id: documentId },
         data: { status: 'error' },
       });
-      await this.emitEvent(userId, documentId, 'error', `处理失败：${message}`);
+      await this.sse.emit(userId, {
+        taskType: 'document_process',
+        taskId: documentId,
+        status: 'error',
+        message: `处理失败：${message}`,
+      });
       throw error;
     }
   }
@@ -128,17 +144,5 @@ export class ChunkService {
       INSERT INTO document_chunks (id, "documentId", content, "chunkIndex", embedding, "createdAt")
       VALUES (${randomUUID()}, ${documentId}, ${content}, ${chunkIndex}, ${literal}::vector, now())
     `;
-  }
-
-  private emitEvent(
-    userId: string,
-    taskId: string,
-    status: 'processing' | 'done' | 'error',
-    message: string,
-    metadata?: Prisma.InputJsonValue,
-  ) {
-    return this.prisma.taskEvent.create({
-      data: { userId, taskType: 'document_process', taskId, status, message, metadata },
-    });
   }
 }
