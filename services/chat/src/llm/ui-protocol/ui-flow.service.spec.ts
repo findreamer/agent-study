@@ -6,17 +6,30 @@ function makeAction(componentType: UIAction['componentType'], payload: UIAction[
   return { componentType, payload };
 }
 
+/** 按测试场景推进：选择类型 → 提交详情，返回会话所处阶段 */
+function reachConfirmStage(flow: UiFlowService, sessionId: string): void {
+  flow.handleAction(sessionId, makeAction('selection', { type: 'select', selectedId: 'functional' }));
+  flow.handleAction(sessionId, makeAction('form', {
+    type: 'submit',
+    formData: {
+      name: '会话记忆系统',
+      priority: 'P0',
+      description: '面向需求分析师的多轮会话记忆',
+    },
+  }));
+}
+
 describe('UiFlowService', () => {
-  it('selection：选择需求类型后进入详情收集阶段并返回表单', () => {
+  it('selection：选择需求类型后进入 fill_detail 阶段并返回表单', () => {
     const flow = new UiFlowService();
 
     const result = flow.handleAction(
       's1',
-      makeAction('selection', { type: 'select', selectedId: 'feature' }),
+      makeAction('selection', { type: 'select', selectedId: 'functional' }),
     );
 
-    expect(result.context?.sessionStage).toBe('collect_details');
-    expect(result.context?.collectedData).toMatchObject({ requirementType: '新功能' });
+    expect(result.context?.sessionStage).toBe('fill_detail');
+    expect(result.context?.collectedData).toMatchObject({ requirementType: '功能需求' });
     const form = result.components.find((c) => c.type === 'form') as FormResponse;
     expect(form.title).toContain('需求详情');
     expect(form.fields.map((f) => f.name)).toEqual([
@@ -29,9 +42,9 @@ describe('UiFlowService', () => {
     ]);
   });
 
-  it('form：提交需求分析返回 confirmation + steps 组件', () => {
+  it('form：提交需求详情后进入 confirm 阶段，返回 confirmation + card 组件', () => {
     const flow = new UiFlowService();
-    flow.handleAction('s2', makeAction('selection', { type: 'select', selectedId: 'feature' }));
+    flow.handleAction('s2', makeAction('selection', { type: 'select', selectedId: 'functional' }));
 
     const result = flow.handleAction('s2', makeAction('form', {
       type: 'submit',
@@ -39,22 +52,27 @@ describe('UiFlowService', () => {
         name: '会话记忆系统',
         priority: 'P0',
         description: '面向需求分析师的多轮会话记忆',
+        expectedDate: '2026-12-01',
+        budget: 30,
       },
     }));
 
     expect(result.context?.sessionStage).toBe('confirm');
     const types = result.components.map((c) => c.type);
     expect(types).toContain('confirmation');
-    expect(types).toContain('steps');
+    expect(types).toContain('card');
     const confirmation = result.components.find((c) => c.type === 'confirmation')!;
     expect(JSON.stringify(confirmation)).toContain('会话记忆系统');
-    expect(JSON.stringify(confirmation)).toContain('新功能');
-    const steps = result.components.find((c) => c.type === 'steps')!;
-    expect(steps).toMatchObject({ currentStep: 2 });
+    expect(JSON.stringify(confirmation)).toContain('功能需求');
+    expect(confirmation).toMatchObject({ confirmLabel: '确认并开始分析', cancelLabel: '返回修改' });
+    const card = result.components.find((c) => c.type === 'card')!;
+    expect(card).toMatchObject({ title: '需求信息：会话记忆系统' });
+    expect(JSON.stringify(card)).toContain('P0');
   });
 
-  it('form：缺少必填字段时抛 400 语义错误', () => {
+  it('form：缺少必填字段时抛 400 语义错误，阶段不推进', () => {
     const flow = new UiFlowService();
+    flow.handleAction('s3', makeAction('selection', { type: 'select', selectedId: 'tech' }));
     expect(() =>
       flow.handleAction('s3', makeAction('form', {
         type: 'submit',
@@ -63,33 +81,40 @@ describe('UiFlowService', () => {
     ).toThrow(/需求描述/);
   });
 
-  it('confirmation：确认后进入分析阶段，取消则退回表单', () => {
+  it('confirmation：确认后进入 result 阶段返回 steps + action_buttons；取消回退到 fill_detail', () => {
     const flow = new UiFlowService();
-    flow.handleAction('s4', makeAction('selection', { type: 'select', selectedId: 'tech' }));
-    flow.handleAction('s4', makeAction('form', {
-      type: 'submit',
-      formData: { name: '向量库迁移', priority: 'P1', description: '迁移到 pgvector' },
-    }));
+    reachConfirmStage(flow, 's4');
 
     const confirmed = flow.handleAction('s4', makeAction('confirmation', { type: 'confirm', confirmed: true }));
-    expect(confirmed.context?.sessionStage).toBe('analyzing');
+    expect(confirmed.context?.sessionStage).toBe('result');
+    expect(confirmed.components.map((c) => c.type)).toEqual(['steps', 'action_buttons']);
     expect(confirmed.components[0]).toMatchObject({ type: 'steps', currentStep: 3 });
+    expect(JSON.stringify(confirmed.components[1])).toContain('查看分析报告');
 
-    flow.handleAction('s5', makeAction('selection', { type: 'select', selectedId: 'tech' }));
-    flow.handleAction('s5', makeAction('form', {
-      type: 'submit',
-      formData: { name: '另一个需求', priority: 'P2', description: '描述' },
-    }));
-    const cancelled = flow.handleAction('s5', makeAction('confirmation', { type: 'confirm', confirmed: false }));
-    expect(cancelled.context?.sessionStage).toBe('collect_details');
+    const cancelled = flow.handleAction('s5b', makeAction('confirmation', { type: 'confirm', confirmed: false }));
+    expect(cancelled.context?.sessionStage).toBe('fill_detail');
     expect(cancelled.components.some((c) => c.type === 'form')).toBe(true);
   });
 
-  it('table：行选择返回需求详情卡片', () => {
+  it('回退后可重新提交并再次到达 confirm 阶段（回退不破坏状态机）', () => {
+    const flow = new UiFlowService();
+    reachConfirmStage(flow, 's4b');
+    flow.handleAction('s4b', makeAction('confirmation', { type: 'confirm', confirmed: false }));
+
+    const resubmit = flow.handleAction('s4b', makeAction('form', {
+      type: 'submit',
+      formData: { name: '修订后的需求', priority: 'P1', description: '修改后的描述' },
+    }));
+    expect(resubmit.context?.sessionStage).toBe('confirm');
+    expect(JSON.stringify(resubmit.components)).toContain('修订后的需求');
+  });
+
+  it('table：行选择返回需求详情卡片，阶段不推进', () => {
     const flow = new UiFlowService();
 
     const result = flow.handleAction('s6', makeAction('table', { type: 'row_select', rowIndex: 0 }));
 
+    expect(result.context?.sessionStage).toBe('select_type');
     expect(result.components[0]).toMatchObject({
       type: 'card',
       title: '需求详情：会话记忆系统',
@@ -97,20 +122,22 @@ describe('UiFlowService', () => {
     expect(JSON.stringify(result.components[0])).toContain('REQ-20240315-001');
   });
 
-  it('card/action_buttons：查看报告进入完成阶段，再提需求重置流程', () => {
+  it('card/action_buttons：查看报告、查看列表；再提需求重置回 select_type', () => {
     const flow = new UiFlowService();
-    flow.handleAction('s7', makeAction('table', { type: 'row_select', rowIndex: 0 }));
+    reachConfirmStage(flow, 's7');
+    flow.handleAction('s7', makeAction('confirmation', { type: 'confirm', confirmed: true }));
 
-    const report = flow.handleAction('s7', makeAction('card', { type: 'click', actionId: 'view_report' }));
-    expect(report.context?.sessionStage).toBe('completed');
+    const report = flow.handleAction('s7', makeAction('action_buttons', { type: 'click', actionId: 'view_report' }));
+    expect(report.context?.sessionStage).toBe('result');
     expect(report.components[0].type).toBe('card');
-
-    const restart = flow.handleAction('s7', makeAction('action_buttons', { type: 'click', actionId: 'new_requirement' }));
-    expect(restart.context?.sessionStage).toBe('intake');
-    expect(restart.components[0].type).toBe('selection');
 
     const list = flow.handleAction('s7', makeAction('action_buttons', { type: 'click', actionId: 'view_requirements' }));
     expect(list.components[0]).toMatchObject({ type: 'table', selectable: true });
+
+    const restart = flow.handleAction('s7', makeAction('action_buttons', { type: 'click', actionId: 'new_requirement' }));
+    expect(restart.context?.sessionStage).toBe('select_type');
+    expect(restart.context?.collectedData).toEqual({});
+    expect(restart.components[0].type).toBe('selection');
   });
 
   it('非法操作：payload 类型与组件不匹配、未知 actionId、行越界均抛 400 语义错误', () => {
@@ -129,17 +156,17 @@ describe('UiFlowService', () => {
     ).toThrow(/不支持 UI 操作/);
   });
 
-  it('recordUserInput/recordAssistantResponse：维护会话历史并暴露上下文', async () => {
+  it('recordUserInput/recordAssistantResponse：维护会话历史并暴露上下文', () => {
     const flow = new UiFlowService();
     const first = flow.recordUserInput('s9', '我要提一个新需求');
-    expect(first.stage).toBe('intake');
+    expect(first.stage).toBe('select_type');
     expect(first.history).toEqual([]);
 
     flow.recordAssistantResponse('s9', {
       message: '请选择需求类型',
-      components: [{ type: 'selection', title: 't', options: [{ id: 'feature', label: '新功能' }] }],
+      components: [{ type: 'selection', title: 't', options: [{ id: 'functional', label: '功能需求' }] }],
     });
-    const second = flow.recordUserInput('s9', '选新功能');
+    const second = flow.recordUserInput('s9', '选功能需求');
     expect(second.history).toEqual([
       { role: 'user', content: '我要提一个新需求' },
       { role: 'assistant', content: '请选择需求类型\n[selection 组件]' },
