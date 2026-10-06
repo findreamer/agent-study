@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
 import { LlmController } from './llm.controller.js';
 import { LlmService } from './llm.service.js';
 import { RequirementService } from './requirement.service.js';
@@ -11,9 +12,14 @@ import { VectorStoreService } from './embedding/vector-store.service.js';
 import { EmbeddingController } from './embedding/embedding.controller.js';
 import { AgentsController } from './agents/agents.controller.js';
 import { AgentOrchestratorService } from './agents/orchestrator.service.js';
+import { UiChatController } from './ui-protocol/ui-chat.controller.js';
+import { UiResponseService } from './ui-protocol/ui-response.service.js';
+import { UiFlowService } from './ui-protocol/ui-flow.service.js';
 
 @Module({
-  controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController],
+  // UiChatController 带 JwtAuthGuard，守卫实例化需要 AuthModule
+  imports: [AuthModule],
+  controllers: [LlmController, MemoryController, FilesController, EmbeddingController, AgentsController, UiChatController],
   providers: [
     LlmService,
     RequirementService,
@@ -22,6 +28,8 @@ import { AgentOrchestratorService } from './agents/orchestrator.service.js';
     XenovaEmbeddings,
     VectorStoreService,
     AgentOrchestratorService,
+    UiResponseService,
+    UiFlowService,
   ],
   exports: [
     LlmService,
