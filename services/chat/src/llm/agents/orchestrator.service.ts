@@ -59,18 +59,23 @@ export class AgentOrchestratorService {
 
   /**
    * 固定编排：抽取 → 澄清判断 → 并行（分析 + 风控）→ 汇总。
+   * retrievedContext 是检索增强上下文（会话历史 + 文档检索片段），
+   * 非空时拼进输入，让每个 Agent 都能看到同一份背景；
    * 需要澄清时提前终止；任何环节失败走 manual_review 兜底。
    */
-  async orchestrate(input: string): Promise<OrchestrationResult> {
+  async orchestrate(input: string, retrievedContext?: string): Promise<OrchestrationResult> {
     const agents = createSubAgents(this.chatModel());
     const steps: AgentStep[] = [];
     const usedAgents: string[] = [];
+    const effectiveInput = retrievedContext?.trim()
+      ? `${input}\n\n${retrievedContext}`
+      : input;
 
     try {
       const extracted = await this.runStep(
         'extract',
         async () => {
-          const raw = (await agents.extractAgent.invoke({ input })) as string;
+          const raw = (await agents.extractAgent.invoke({ input: effectiveInput })) as string;
           return JSON.stringify(extractJson(raw));
         },
         steps,
@@ -81,7 +86,7 @@ export class AgentOrchestratorService {
         'clarify',
         async () => {
           const raw = (await agents.clarifyAgent.invoke({
-            input,
+            input: effectiveInput,
             extracted,
           })) as string;
           return extractJson(raw);
@@ -108,12 +113,12 @@ export class AgentOrchestratorService {
       const [analysisRaw, riskRaw] = await Promise.all([
         this.runStep<string>(
           'analysis',
-          () => agents.analysisAgent.invoke({ input, extracted }) as Promise<string>,
+          () => agents.analysisAgent.invoke({ input: effectiveInput, extracted }) as Promise<string>,
           steps,
         ),
         this.runStep<string>(
           'risk',
-          () => agents.riskAgent.invoke({ input, extracted }) as Promise<string>,
+          () => agents.riskAgent.invoke({ input: effectiveInput, extracted }) as Promise<string>,
           steps,
         ),
       ]);
@@ -123,7 +128,7 @@ export class AgentOrchestratorService {
         'summary',
         () =>
           agents.summaryAgent.invoke({
-            input,
+            input: effectiveInput,
             extracted,
             analysis: analysisRaw,
             risk: riskRaw,

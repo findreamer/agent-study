@@ -13,8 +13,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthUser } from '../auth/jwt-auth.guard.js';
 import { ConversationService } from './conversation.service.js';
-import { ConversationChatService } from './conversation-chat.service.js';
 import { MessageService } from '../message/message.service.js';
+import { AdvancedAnalysisService } from '../llm/advanced-analysis.service.js';
 
 const MAX_TITLE_LENGTH = 100;
 const MAX_HISTORY_LIMIT = 200;
@@ -25,7 +25,7 @@ export class ConversationController {
   constructor(
     private readonly conversations: ConversationService,
     private readonly messageService: MessageService,
-    private readonly chatService: ConversationChatService,
+    private readonly analysis: AdvancedAnalysisService,
   ) {}
 
   @Post()
@@ -79,8 +79,8 @@ export class ConversationController {
       throw new BadRequestException('input 必须是非空字符串');
     }
     await this.conversations.findById(id, user.userId);
-    const output = await this.chatService.chat(id, input);
-    return { conversationId: id, output };
+    // 统一分析入口：会话历史 + pgvector 检索上下文 → 多 Agent 分析，结论落 messages 表
+    return this.analysis.analyze(user.userId, id, input);
   }
 
   @Delete(':id')

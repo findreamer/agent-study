@@ -15,5 +15,6 @@ import { SearchService } from './search.service.js';
   imports: [AuthModule, LlmModule, SseModule],
   controllers: [DocumentController, SearchController],
   providers: [DocumentService, ChunkService, DocumentEmbeddingService, SearchService],
+  exports: [SearchService],
 })
 export class DocumentModule {}

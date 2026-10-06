@@ -21,6 +21,8 @@ const EXTRACT_JSON =
 class ScriptedChatModel extends SimpleChatModel {
   responses: Partial<Record<AgentMarker, string>>;
   failOn?: AgentMarker;
+  /** 记录每次调用收到的完整提示词文本，供上下文传达断言使用 */
+  texts: string[] = [];
 
   constructor(responses: Partial<Record<AgentMarker, string>>, failOn?: AgentMarker) {
     super({});
@@ -34,6 +36,7 @@ class ScriptedChatModel extends SimpleChatModel {
 
   async _call(messages: BaseMessage[]): Promise<string> {
     const text = messages.map((message) => textOf(message.content)).join('\n');
+    this.texts.push(text);
     const marker = AGENT_MARKERS.find((candidate) => text.includes(candidate));
     if (!marker) {
       throw new Error(`脚本化假模型无法识别提示词：${text.slice(0, 120)}`);
@@ -162,5 +165,44 @@ describe('AgentOrchestratorService', () => {
     expect(result.fallback).toBe('manual_review');
     expect(result.report).toBeNull();
     expect(result.steps.at(-1)).toMatchObject({ agent: 'summary', ok: false });
+  });
+
+  it('orchestrate(input, retrievedContext)：上下文拼进输入，每个 Agent 都能看到', async () => {
+    const model = new ScriptedChatModel({
+      '需求抽取 Agent': EXTRACT_JSON,
+      '澄清判断 Agent': '{"needsClarification":false,"questions":[]}',
+      '需求分析 Agent': '## 功能分解',
+      '风险评估 Agent': '## 技术风险',
+      '报告汇总 Agent': '# 报告',
+    });
+    const service = new AgentOrchestratorService({
+      chatModel: () => model,
+    } as unknown as LlmService);
+
+    const context = '【文档检索上下文】\n[1]（相关度 0.42）\n会话历史持久化到 messages 表';
+    const result = await service.orchestrate('开发一个会话记忆系统', context);
+
+    expect(result.status).toBe('completed');
+    expect(model.texts.length).toBeGreaterThanOrEqual(5);
+    for (const text of model.texts) {
+      expect(text).toContain('开发一个会话记忆系统');
+      expect(text).toContain('【文档检索上下文】');
+    }
+  });
+
+  it('retrievedContext 为空白时不拼接，输入保持原样', async () => {
+    const model = new ScriptedChatModel({
+      '需求抽取 Agent': EXTRACT_JSON,
+      '澄清判断 Agent': '{"needsClarification":true,"questions":["给谁用？"]}',
+    });
+    const service = new AgentOrchestratorService({
+      chatModel: () => model,
+    } as unknown as LlmService);
+
+    const result = await service.orchestrate('做个系统', '   ');
+
+    expect(result.status).toBe('needs_clarification');
+    expect(model.texts[0]).not.toContain('【文档检索上下文】');
+    expect(model.texts[0]).toContain('做个系统');
   });
 });

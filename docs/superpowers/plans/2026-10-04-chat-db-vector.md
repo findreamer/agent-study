@@ -315,9 +315,44 @@ LIMIT ${topK}
 - 单测 130/130（新增 sse.service 6 例、task-event/sse controller 5 例，chunk 测试改为断言 `sse.emit`），typecheck 通过
 - 期间机器重启导致 Docker 守护进程丢失：重新拉起 Docker Desktop + postgres 容器后恢复
 
-## 阶段 5：统一调用链路（待开始）
+## 阶段 5：统一调用链路（统一分析服务已完成 2026-10-06；Global JwtAuthGuard 收编 demo 路由待做）
 
-> 计划：Global JwtAuthGuard（@Public() 豁免 demo 路由与健康检查）→ 创建会话 → 上传需求文档 → 分析（检索 topK 上下文 + 会话历史喂给编排器）→ 报告以 ASSISTANT 消息持久化并写 task_events。
+### 实现 Prompt（原文）
+
+> 把前面所有能力整合为统一的分析入口，严格按以下要求执行：
+>
+> 1. 统一分析服务（services/chat/src/llm/advanced-analysis.service.ts）：
+>    - analyze(userId, conversationId, input)：
+>      1. DbChatHistory 读取会话历史
+>      2. SearchService 语义检索当前用户文档（topK=3）
+>      3. 拼接历史 + 检索上下文 + 当前输入
+>      4. OrchestratorService.orchestrate(input, retrievedContext) 执行多 Agent 分析
+>      5. 把用户输入与分析结论写入 messages 表
+>      6. 返回 report、usedAgents、retrievedDocuments
+>
+> 2. POST /api/conversations/:id/chat 接入该服务（非流式 JSON，第六章再升级流式 UI）
+
+### 关键设计与核心片段
+
+**数据流**：`analyze(userId, conversationId, input)` 并行取 `DbChatMessageHistory.getMessages()`（messages 表底座）与 `search.similaritySearch(input, userId, 3)`（pgvector），拼成 `retrievedContext`——`【会话历史】transcript` + `【文档检索上下文】[i]（相关度 x.xx）content` 两块（各自可缺省、条目截断 400 字符）——交给 `orchestrate(input, retrievedContext)`；编排器把上下文拼进 `effectiveInput`，五个 Agent 看到同一份背景。
+
+**结论落库**：用户输入恒写 `USER` 消息；`completed` → 报告写 `ASSISTANT`，`needs_clarification` → 澄清问题写 `ASSISTANT`（保住下轮对话连贯性），`failed` → 不写助手消息；报告仍落盘 workspace `reports/`（第四章报告落盘能力保留）。
+
+**orchestrate 签名升级**：`orchestrate(input, retrievedContext?)`，空白上下文按原输入处理——第四章 demo 用法（单参）不变。
+
+**模块接线**（拆掉了两处障碍）：
+- `MessageModule`（新）：MessageService 从 ConversationModule 拆出，Conversation 与 Advanced 两模块共用，避免 `ConversationModule ↔ AdvancedModule` 循环依赖
+- `DocumentModule` 导出 `SearchService`；`AdvancedModule` imports `[LlmModule, DocumentModule, MessageModule]`
+- **Nest DI 陷阱**：advanced-analysis.service 里 SearchService/MessageService 必须值导入——`import type` 会抹掉 `design:paramtypes` 元数据，e2e 起不来（`Nest can't resolve dependencies ... at index [1]`）
+- 删除 `ConversationChatService`（简单对话链路被统一入口取代）
+
+**路由**：`POST /api/conversations/:id/chat` 与 `POST /api/advanced/analyze`（第四章演示路由，改为 JWT + `{conversationId, input}` 契约）都委托同一个 `AdvancedAnalysisService.analyze`，非流式 JSON。
+
+### 验证记录（2026-10-06，真实链路）
+
+- 建会话 → `POST /api/conversations/:id/chat` 触发统一分析：5 Agent 全部执行（extract 7s / clarify 15s / risk 74s / analysis 74s / summary 67s，思考型模型偏慢），status=completed，报告落盘 + ASSISTANT 消息落库（`GET /:id/messages` 可见 USER+ASSISTANT 两条）
+- 客户端 curl 180s 超时而服务端继续执行成功的教训：同步分析耗时超过 3 分钟，第六章流式 UI（SSE）是刚需
+- 单测 132/132（analysis 重写 6 例：上下文拼接/空上下文/落库三分支/截断；orchestrator 新增上下文传达与空白上下文 2 例；advanced.controller 新契约），typecheck 通过
 
 ## 阶段 6：chat-web 页面 + 端到端验证（待开始）
 
