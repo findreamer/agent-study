@@ -91,7 +91,8 @@ describe('UiFlowService', () => {
     expect(confirmed.components[0]).toMatchObject({ type: 'steps', currentStep: 3 });
     expect(JSON.stringify(confirmed.components[1])).toContain('查看分析报告');
 
-    const cancelled = flow.handleAction('s5b', makeAction('confirmation', { type: 'confirm', confirmed: false }));
+    reachConfirmStage(flow, 's5');
+    const cancelled = flow.handleAction('s5', makeAction('confirmation', { type: 'confirm', confirmed: false }));
     expect(cancelled.context?.sessionStage).toBe('fill_detail');
     expect(cancelled.components.some((c) => c.type === 'form')).toBe(true);
   });
@@ -138,6 +139,83 @@ describe('UiFlowService', () => {
     expect(restart.context?.sessionStage).toBe('select_type');
     expect(restart.context?.collectedData).toEqual({});
     expect(restart.components[0].type).toBe('selection');
+  });
+
+  it('阶段守卫：select_type 阶段直接提交表单不推进，重发 selection 组件', () => {
+    const flow = new UiFlowService();
+
+    const result = flow.handleAction('g1', makeAction('form', {
+      type: 'submit',
+      formData: { name: '跳过类型选择的需求', priority: 'P0', description: '描述' },
+    }));
+
+    expect(result.context?.sessionStage).toBe('select_type');
+    expect(result.components.map((c) => c.type)).toEqual(['selection']);
+  });
+
+  it('阶段守卫：fill_detail 阶段重复选类型不回退，重发表单并保留已收集数据', () => {
+    const flow = new UiFlowService();
+    flow.handleAction('g2', makeAction('selection', { type: 'select', selectedId: 'functional' }));
+
+    const result = flow.handleAction('g2', makeAction('selection', { type: 'select', selectedId: 'tech' }));
+
+    expect(result.context?.sessionStage).toBe('fill_detail');
+    expect(result.context?.collectedData).toMatchObject({ requirementType: '功能需求' });
+    expect(result.components.map((c) => c.type)).toEqual(['form']);
+  });
+
+  it('阶段守卫：confirm 阶段收到表单提交，重发 confirmation + card', () => {
+    const flow = new UiFlowService();
+    reachConfirmStage(flow, 'g3');
+
+    const result = flow.handleAction('g3', makeAction('form', {
+      type: 'submit',
+      formData: { name: '乱序提交', priority: 'P1', description: '描述' },
+    }));
+
+    expect(result.context?.sessionStage).toBe('confirm');
+    expect(result.components.map((c) => c.type)).toEqual(['confirmation', 'card']);
+  });
+
+  it('阶段守卫：result 阶段收到确认操作，重发 steps + action_buttons', () => {
+    const flow = new UiFlowService();
+    reachConfirmStage(flow, 'g4');
+    flow.handleAction('g4', makeAction('confirmation', { type: 'confirm', confirmed: true }));
+
+    const result = flow.handleAction('g4', makeAction('confirmation', { type: 'confirm', confirmed: true }));
+
+    expect(result.context?.sessionStage).toBe('result');
+    expect(result.components.map((c) => c.type)).toEqual(['steps', 'action_buttons']);
+  });
+
+  it('非阶段绑定交互任意阶段可用：select_type 阶段点击查看列表', () => {
+    const flow = new UiFlowService();
+
+    const result = flow.handleAction('g5', makeAction('action_buttons', { type: 'click', actionId: 'view_requirements' }));
+
+    expect(result.context?.sessionStage).toBe('select_type');
+    expect(result.components[0]).toMatchObject({ type: 'table', selectable: true });
+  });
+
+  it('rawInput 预填：chat 输入的原话进入表单描述字段 defaultValue', () => {
+    const flow = new UiFlowService();
+    flow.recordUserInput('g6', '我要提一个新需求：用户希望能够批量导入 Excel 数据');
+
+    const result = flow.handleAction('g6', makeAction('selection', { type: 'select', selectedId: 'functional' }));
+
+    const form = result.components.find((c) => c.type === 'form') as FormResponse;
+    const description = form.fields.find((f) => f.name === 'description')!;
+    expect(description.defaultValue).toContain('批量导入 Excel 数据');
+  });
+
+  it('buildDefaultEntry：LLM 不可用时返回快捷操作入口', () => {
+    const flow = new UiFlowService();
+
+    const result = flow.buildDefaultEntry('g7');
+
+    expect(result.message).toContain('快捷操作');
+    expect(result.components[0]).toMatchObject({ type: 'action_buttons' });
+    expect(result.context?.sessionStage).toBe('select_type');
   });
 
   it('非法操作：payload 类型与组件不匹配、未知 actionId、行越界均抛 400 语义错误', () => {

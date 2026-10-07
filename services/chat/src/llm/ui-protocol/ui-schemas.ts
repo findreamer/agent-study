@@ -31,6 +31,7 @@ export const formFieldSchema = z.object({
     z.object({ value: z.string(), label: z.string() }),
   ).optional(),
   placeholder: z.string().optional(),
+  defaultValue: z.string().optional(),
 });
 
 export const formResponseSchema = z.object({

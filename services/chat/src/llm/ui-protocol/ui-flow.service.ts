@@ -60,35 +60,36 @@ const REQUIREMENT_TYPE_LABELS: Record<string, string> = {
   tech: '技术需求',
 };
 
-const REQUIREMENT_FORM: FormResponse = {
+const REQUIREMENT_FORM_BASE: Omit<FormResponse, 'fields'> = {
   type: 'form',
   title: '请补充需求详情',
-  fields: [
-    { name: 'name', label: '需求名称', type: 'input', required: true },
-    {
-      name: 'priority',
-      label: '优先级',
-      type: 'select',
-      required: true,
-      options: [
-        { value: 'P0', label: 'P0（立即排期）' },
-        { value: 'P1', label: 'P1（本迭代）' },
-        { value: 'P2', label: 'P2（排期待定）' },
-      ],
-    },
-    { name: 'targetUsers', label: '目标用户', type: 'input' },
-    {
-      name: 'description',
-      label: '需求描述',
-      type: 'textarea',
-      required: true,
-      placeholder: '描述业务背景、要解决的问题与预期效果',
-    },
-    { name: 'expectedDate', label: '期望上线日期', type: 'date' },
-    { name: 'budget', label: '预算（万元）', type: 'number' },
-  ],
   submitLabel: '提交需求分析',
 };
+
+const REQUIREMENT_FORM_FIELDS: FormResponse['fields'] = [
+  { name: 'name', label: '需求名称', type: 'input', required: true },
+  {
+    name: 'priority',
+    label: '优先级',
+    type: 'select',
+    required: true,
+    options: [
+      { value: 'P0', label: 'P0（立即排期）' },
+      { value: 'P1', label: 'P1（本迭代）' },
+      { value: 'P2', label: 'P2（排期待定）' },
+    ],
+  },
+  { name: 'targetUsers', label: '目标用户', type: 'input' },
+  {
+    name: 'description',
+    label: '需求描述',
+    type: 'textarea',
+    required: true,
+    placeholder: '描述业务背景、要解决的问题与预期效果',
+  },
+  { name: 'expectedDate', label: '期望上线日期', type: 'date' },
+  { name: 'budget', label: '预算（万元）', type: 'number' },
+];
 
 const RESULT_ACTIONS: ActionButtonsResponse = {
   type: 'action_buttons',
@@ -145,6 +146,18 @@ const FIELD_LABELS: Record<string, string> = {
   budget: '预算（万元）',
 };
 
+// 会推进流程的操作与其所属阶段的绑定关系；不在此表中的交互（table 行选择、
+// card/action_buttons 点击）不推进阶段，任何阶段都允许
+const STAGE_BOUND_INTERACTIONS: {
+  componentType: UIAction['componentType'];
+  payloadType: string;
+  stage: UIFlowStage;
+}[] = [
+  { componentType: 'selection', payloadType: 'select', stage: 'select_type' },
+  { componentType: 'form', payloadType: 'submit', stage: 'fill_detail' },
+  { componentType: 'confirmation', payloadType: 'confirm', stage: 'confirm' },
+];
+
 interface UISession {
   stage: UIFlowStage;
   collectedData: Record<string, unknown>;
@@ -165,6 +178,8 @@ export class UiFlowService {
     history: { role: 'user' | 'assistant'; content: string }[];
   } {
     const session = this.getOrCreate(sessionId);
+    // 留存最近一句原话，表单的描述字段可用它预填
+    session.collectedData.rawInput = input;
     session.history.push({ role: 'user', content: input });
     session.updatedAt = Date.now();
     return {
@@ -183,6 +198,28 @@ export class UiFlowService {
       content: [response.message, ...response.components.map((c) => `[${c.type} 组件]`)].join('\n'),
     });
     session.updatedAt = Date.now();
+  }
+
+  /** LLM 不可用时的降级入口：快捷操作按钮替代自由对话 */
+  buildDefaultEntry(sessionId: string): AIUIResponse {
+    const session = this.getOrCreate(sessionId);
+    return {
+      message: '智能对话暂不可用，已切换到快捷操作模式，请选择需要的功能。',
+      components: [
+        {
+          type: 'action_buttons',
+          buttons: [
+            { id: 'new_requirement', label: '提交新需求', style: 'primary' },
+            { id: 'view_requirements', label: '查看需求列表' },
+          ],
+          layout: 'horizontal',
+        },
+      ],
+      context: {
+        sessionStage: session.stage,
+        collectedData: session.collectedData,
+      },
+    };
   }
 
   /** action 入口：根据用户在 UI 上的操作推进（或回退）状态机 */
@@ -209,6 +246,19 @@ export class UiFlowService {
         },
       };
     };
+
+    // 结构校验：组件与 payload 配对错误属于客户端 bug，直接 400
+    this.assertPayloadPairing(action);
+
+    // 阶段守卫：推进型操作必须匹配当前阶段，乱序操作不推进、重发当前阶段组件
+    const bound = STAGE_BOUND_INTERACTIONS.find(
+      (entry) =>
+        entry.componentType === action.componentType &&
+        entry.payloadType === action.payload.type,
+    );
+    if (bound && bound.stage !== session.stage) {
+      return this.buildStageResponse(session);
+    }
 
     switch (action.componentType) {
       case 'selection':
@@ -244,12 +294,10 @@ export class UiFlowService {
       throw new BadRequestException('selectedId 不能为空');
     }
     const typeLabel = REQUIREMENT_TYPE_LABELS[typeId] ?? typeId;
-    return respond(
-      'fill_detail',
-      `已选择「${typeLabel}」，请补充需求详情后提交。`,
-      [REQUIREMENT_FORM],
-      { requirementType: typeLabel },
-    );
+    const collected = { ...session.collectedData, requirementType: typeLabel };
+    return respond('fill_detail', `已选择「${typeLabel}」，请补充需求详情后提交。`, [
+      this.buildDetailForm(collected),
+    ], { requirementType: typeLabel });
   }
 
   /** Stage 2 → 3：提交需求详情，返回确认摘要 + 需求信息卡 */
@@ -262,7 +310,7 @@ export class UiFlowService {
       throw new BadRequestException('form 组件只接受 submit 操作');
     }
     const formData = action.payload.formData;
-    const missing = REQUIREMENT_FORM.fields
+    const missing = REQUIREMENT_FORM_FIELDS
       .filter((field) => field.required && !formData[field.name])
       .map((field) => field.label);
     if (missing.length) {
@@ -291,7 +339,7 @@ export class UiFlowService {
       return respond(
         'fill_detail',
         '已取消确认，请修改需求详情后重新提交。',
-        [REQUIREMENT_FORM],
+        [this.buildDetailForm(session.collectedData)],
       );
     }
     return respond(
@@ -345,7 +393,7 @@ export class UiFlowService {
           REQUIREMENT_TABLE,
         ]);
       case 'view_report':
-        return respond(session.stage === 'confirm' ? 'result' : session.stage, '需求分析报告如下。', [
+        return respond(session.stage, '需求分析报告如下。', [
           {
             type: 'card',
             title: '需求分析报告：会话记忆系统',
@@ -362,8 +410,83 @@ export class UiFlowService {
     }
   }
 
+  /** 组件类型与 payload 配对校验，配对错误属于客户端 bug */
+  private assertPayloadPairing(action: UIAction): void {
+    const payload = action.payload as { type?: string };
+    const expected: Partial<Record<UIAction['componentType'], string>> = {
+      selection: 'select',
+      form: 'submit',
+      confirmation: 'confirm',
+      table: 'row_select',
+      card: 'click',
+      action_buttons: 'click',
+    };
+    if (!(action.componentType in expected)) {
+      throw new BadRequestException(
+        `组件类型 ${action.componentType} 不支持 UI 操作回传`,
+      );
+    }
+    if (payload.type !== expected[action.componentType]) {
+      throw new BadRequestException(
+        `${action.componentType} 组件只接受 ${expected[action.componentType]} 操作`,
+      );
+    }
+  }
+
+  /** 阶段守卫命中时重发当前阶段的组件，引导用户按流程操作 */
+  private buildStageResponse(session: UISession): AIUIResponse {
+    const context = {
+      sessionStage: session.stage,
+      collectedData: session.collectedData,
+    };
+    switch (session.stage) {
+      case 'select_type':
+        return {
+          message: '请先选择需求类型，再进行后续操作。',
+          components: [REQUIREMENT_TYPES],
+          context,
+        };
+      case 'fill_detail':
+        return {
+          message: '请先补充并提交需求详情。',
+          components: [this.buildDetailForm(session.collectedData)],
+          context,
+        };
+      case 'confirm': {
+        const formData = (session.collectedData.requirementForm ?? {}) as Record<string, unknown>;
+        return {
+          message: '请先确认需求摘要。',
+          components: [
+            this.buildConfirmation(formData, session.collectedData),
+            this.buildRequirementCard(formData, session.collectedData),
+          ],
+          context,
+        };
+      }
+      case 'result':
+        return {
+          message: '需求分析已完成，请选择后续操作。',
+          components: [this.buildSteps('result'), RESULT_ACTIONS],
+          context,
+        };
+    }
+  }
+
   private buildSteps(stage: UIFlowStage): StepsResponse {
     return { type: 'steps', steps: FLOW_STEPS, currentStep: STAGE_INDEX[stage] };
+  }
+
+  /** 详情表单：用户在 chat 里说过的话预填进描述字段，少打一遍字 */
+  private buildDetailForm(collectedData: Record<string, unknown>): FormResponse {
+    const rawInput = collectedData.rawInput;
+    return {
+      ...REQUIREMENT_FORM_BASE,
+      fields: REQUIREMENT_FORM_FIELDS.map((field) =>
+        field.name === 'description' && typeof rawInput === 'string' && rawInput
+          ? { ...field, defaultValue: rawInput }
+          : field,
+      ),
+    };
   }
 
   private buildConfirmation(

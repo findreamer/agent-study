@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Post,
+  ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard.js';
@@ -51,11 +52,16 @@ export class UiChatController {
       throw new BadRequestException('input 必须是非空字符串');
     }
     const { history, ...context } = this.flow.recordUserInput(sessionId, input);
-    const response = await this.uiResponse.generateUIResponse(
-      input,
-      history,
-      context,
-    );
+    let response: AIUIResponse;
+    try {
+      response = await this.uiResponse.generateUIResponse(input, history, context);
+    } catch (error) {
+      // LLM 不可用（未配 key / 上游故障）时降级为快捷操作入口，其余错误照常抛出
+      if (error instanceof ServiceUnavailableException) {
+        return this.flow.buildDefaultEntry(sessionId);
+      }
+      throw error;
+    }
     this.flow.recordAssistantResponse(sessionId, response);
     return response;
   }

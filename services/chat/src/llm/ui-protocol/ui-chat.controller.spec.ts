@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { UiChatController } from './ui-chat.controller.js';
 import type { AIUIResponse } from './ui-types.js';
 
@@ -15,6 +16,9 @@ function makeController() {
       .mockReturnValue({ stage: 'intake', collectedData: {}, history: [] }),
     recordAssistantResponse: vi.fn(),
     handleAction: vi.fn().mockReturnValue({ message: 'ok', components: [] }),
+    buildDefaultEntry: vi
+      .fn()
+      .mockReturnValue({ message: '快捷操作', components: [] }),
   };
   return {
     controller: new UiChatController(
@@ -45,6 +49,28 @@ describe('UiChatController', () => {
     const { controller } = makeController();
     await expect(controller.chat({ input: 'x' })).rejects.toThrow(/sessionId/);
     await expect(controller.chat({ sessionId: 's1' })).rejects.toThrow(/input/);
+  });
+
+  it('POST chat：LLM 503 时降级返回快捷操作入口', async () => {
+    const { controller, uiResponse, flow } = makeController();
+    uiResponse.generateUIResponse.mockRejectedValue(
+      new ServiceUnavailableException('LLM 未就绪'),
+    );
+    (flow.buildDefaultEntry as ReturnType<typeof vi.fn>).mockClear();
+    const result = await controller.chat({ sessionId: 's1', input: '随便聊聊' });
+
+    expect(result).toEqual({ message: '快捷操作', components: [] });
+    expect(flow.buildDefaultEntry).toHaveBeenCalledWith('s1');
+    expect(flow.recordAssistantResponse).not.toHaveBeenCalled();
+  });
+
+  it('POST chat：LLM 其他错误照常抛出，不降级', async () => {
+    const { controller, uiResponse } = makeController();
+    uiResponse.generateUIResponse.mockRejectedValue(new Error('模型输出解析失败'));
+
+    await expect(controller.chat({ sessionId: 's1', input: 'x' })).rejects.toThrow(
+      /解析失败/,
+    );
   });
 
   it('POST action：校验后委托 UiFlowService.handleAction', () => {

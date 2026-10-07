@@ -31,6 +31,7 @@ export interface FormField {
   required?: boolean;
   options?: FormFieldOption[];
   placeholder?: string;
+  defaultValue?: string;
 }
 
 export interface FormResponse {
