@@ -1,10 +1,11 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ApiError,
   clearToken,
   getStoredToken,
   login,
-  postAuthorized,
+  apiPost,
   storeToken,
 } from "@/lib/api";
 import type { AIUIResponse, UIAction, UIResponse } from "@/lib/ui-protocol";
@@ -80,12 +81,13 @@ export function AIChatContainer() {
     setEntries((prev) => [...prev, { id: nextEntryId(), role: "user", text }]);
     setLoading(true);
     try {
-      const response = await postAuthorized<AIUIResponse>("/api/ui-chat/chat", token, {
+      const response = await apiPost<AIUIResponse>("/api/ui-chat/chat", {
         sessionId,
         input: text,
       });
       appendAssistant(response);
     } catch (e) {
+      if (e instanceof ApiError && e.status === 401) setToken(null);
       setEntries((prev) => [
         ...prev,
         { id: nextEntryId(), role: "assistant", error: e instanceof Error ? e.message : "请求失败" },
@@ -101,12 +103,13 @@ export function AIChatContainer() {
       if (!token || loading) return;
       setLoading(true);
       try {
-        const response = await postAuthorized<AIUIResponse>("/api/ui-chat/action", token, {
+        const response = await apiPost<AIUIResponse>("/api/ui-chat/action", {
           sessionId,
           action,
         });
         appendAssistant(response);
       } catch (e) {
+        if (e instanceof ApiError && e.status === 401) setToken(null);
         setEntries((prev) => [
           ...prev,
           { id: nextEntryId(), role: "assistant", error: e instanceof Error ? e.message : "请求失败" },
