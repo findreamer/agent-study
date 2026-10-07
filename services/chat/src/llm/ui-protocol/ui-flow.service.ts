@@ -229,6 +229,31 @@ export class UiFlowService {
     };
   }
 
+  /** 会话快照（只读），供分析流等服务判断流程状态 */
+  getSession(
+    sessionId: string,
+  ): { stage: UIFlowStage; collectedData: Record<string, unknown> } | null {
+    const session = this.sessions.get(sessionId);
+    if (!session) return null;
+    return { stage: session.stage, collectedData: session.collectedData };
+  }
+
+  /** 从已收集数据组装五 Agent 分析的输入简报 */
+  buildAnalysisInput(collectedData: Record<string, unknown>): string {
+    const lines: string[] = [];
+    const form = (collectedData.requirementForm ?? {}) as Record<string, unknown>;
+    if (collectedData.requirementType) {
+      lines.push(`【需求类型】${String(collectedData.requirementType)}`);
+    }
+    for (const [key, label] of Object.entries(FIELD_LABELS)) {
+      const source = form[key] ?? (key === 'description' ? collectedData.rawInput : undefined);
+      if (source !== undefined && source !== '') {
+        lines.push(`【${label}】${String(source)}`);
+      }
+    }
+    return lines.join('\n');
+  }
+
   /** action 入口：根据用户在 UI 上的操作推进（或回退）状态机 */
   handleAction(sessionId: string, action: UIAction): AIUIResponse {
     const session = this.getOrCreate(sessionId);

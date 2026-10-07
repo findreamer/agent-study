@@ -148,6 +148,46 @@ describe('AgentOrchestratorService', () => {
     expect(result.steps.at(-1)).toMatchObject({ agent: 'extract', ok: false });
   });
 
+  it('流式编排：按五阶段发 stage 事件，Markdown Agent 逐段 delta，返回完整结果', async () => {
+    const service = makeService({
+      '需求抽取 Agent': '```json\n' + EXTRACT_JSON + '\n```',
+      '澄清判断 Agent': '{"needsClarification":false,"questions":[]}',
+      '需求分析 Agent': '## 功能分解\n- 多轮澄清',
+      '风险评估 Agent': '## 技术风险\n- 长上下文成本',
+      '报告汇总 Agent': '# 需求分析报告\n结论：可行',
+    });
+
+    const events: Array<{ type: string; [key: string]: unknown }> = [];
+    const generator = service.streamOrchestration('开发一个会话记忆系统');
+    let next = await generator.next();
+    while (!next.done) {
+      events.push(next.value as { type: string; [key: string]: unknown });
+      next = await generator.next();
+    }
+    const result = next.value;
+
+    expect(result.status).toBe('completed');
+    const stages = events.filter((e) => e.type === 'stage');
+    expect(stages.map((s) => s.label)).toEqual([
+      '需求提取',
+      '澄清判断',
+      '多维度分析',
+      '风险评估',
+      '综合报告',
+    ]);
+    expect(stages.map((s) => s.percent)).toEqual([0, 20, 40, 60, 80]);
+    expect(stages.every((s) => s.total === 5)).toBe(true);
+    const report = events
+      .filter((e) => e.type === 'delta')
+      .map((e) => e.text)
+      .join('');
+    expect(report).toContain('多轮澄清');
+    expect(report).toContain('长上下文成本');
+    expect(report).toContain('需求分析报告');
+    // JSON Agent 静默收集：extract/clarify 的输出不应出现在 delta 里
+    expect(report).not.toContain('targetUsers');
+  });
+
   it('汇总返回空输出时按失败兜底，不静默透传空报告', async () => {
     const service = makeService(
       {

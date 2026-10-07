@@ -7,9 +7,12 @@ import {
   login,
   apiPost,
   storeToken,
+  streamSse,
 } from "@/lib/api";
 import type { AIUIResponse, UIAction, UIResponse } from "@/lib/ui-protocol";
 import { ComponentRenderer } from "./ComponentRenderer";
+import { StreamProgress } from "./StreamProgress";
+import type { StreamStageState } from "./StreamProgress";
 
 interface ChatEntry {
   id: string;
@@ -17,7 +20,11 @@ interface ChatEntry {
   text?: string;
   components?: UIResponse[];
   error?: string;
+  stream?: StreamStageState;
 }
+
+// 与后端五 Agent 流水线一致的阶段标签
+const ANALYSIS_STAGES = ["需求提取", "澄清判断", "多维度分析", "风险评估", "综合报告"];
 
 let entrySeq = 0;
 function nextEntryId(): string {
@@ -59,6 +66,10 @@ export function AIChatContainer() {
     ]);
   }, []);
 
+  const patchEntry = useCallback((id: string, patch: (entry: ChatEntry) => ChatEntry) => {
+    setEntries((prev) => prev.map((entry) => (entry.id === id ? patch(entry) : entry)));
+  }, []);
+
   const handleLogin = useCallback(async () => {
     setAuthLoading(true);
     setAuthError(null);
@@ -73,6 +84,54 @@ export function AIChatContainer() {
     }
   }, [username, password]);
 
+  /** 确认后的五 Agent 分析流水线：进度条 + 报告逐字输出 + 组件整包 */
+  const runAnalysisStream = useCallback(
+    async (sessionId: string, onError: (message: string) => void) => {
+      const entryId = nextEntryId();
+      setEntries((prev) => [
+        ...prev,
+        {
+          id: entryId,
+          role: "assistant",
+          text: "",
+          stream: { stages: ANALYSIS_STAGES, activeIndex: 0, percent: 0 },
+        },
+      ]);
+      try {
+        await streamSse(
+          "/api/ui-chat/analysis/stream",
+          { sessionId },
+          {
+            onStage: (stage) =>
+              patchEntry(entryId, (entry) => ({
+                ...entry,
+                stream: entry.stream
+                  ? { ...entry.stream, activeIndex: stage.index, percent: stage.percent }
+                  : entry.stream,
+              })),
+            onDelta: (text) =>
+              patchEntry(entryId, (entry) => ({ ...entry, text: (entry.text ?? "") + text })),
+            onComponents: (components) =>
+              patchEntry(entryId, (entry) => ({
+                ...entry,
+                components: [...(entry.components ?? []), ...components],
+              })),
+            onDone: () =>
+              patchEntry(entryId, (entry) => ({
+                ...entry,
+                stream: entry.stream ? { ...entry.stream, percent: 100 } : entry.stream,
+              })),
+            onError: onError,
+          },
+        );
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 401) setToken(null);
+        onError(e instanceof Error ? e.message : "请求失败");
+      }
+    },
+    [patchEntry],
+  );
+
   const sendInput = useCallback(async () => {
     const text = input.trim();
     const sessionId = sessionIdRef.current;
@@ -80,34 +139,55 @@ export function AIChatContainer() {
     setInput("");
     setEntries((prev) => [...prev, { id: nextEntryId(), role: "user", text }]);
     setLoading(true);
+    const entryId = nextEntryId();
+    setEntries((prev) => [...prev, { id: entryId, role: "assistant", text: "" }]);
     try {
-      const response = await apiPost<AIUIResponse>("/api/ui-chat/chat", {
-        sessionId,
-        input: text,
-      });
-      appendAssistant(response);
+      await streamSse(
+        "/api/ui-chat/chat/stream",
+        { sessionId, input: text },
+        {
+          onDelta: (delta) =>
+            patchEntry(entryId, (entry) => ({ ...entry, text: (entry.text ?? "") + delta })),
+          onComponents: (components) =>
+            patchEntry(entryId, (entry) => ({
+              ...entry,
+              components: [...(entry.components ?? []), ...components],
+            })),
+          onError: (message) => patchEntry(entryId, (entry) => ({ ...entry, error: message })),
+        },
+      );
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setToken(null);
-      setEntries((prev) => [
-        ...prev,
-        { id: nextEntryId(), role: "assistant", error: e instanceof Error ? e.message : "请求失败" },
-      ]);
+      patchEntry(entryId, (entry) => ({
+        ...entry,
+        error: e instanceof Error ? e.message : "请求失败",
+      }));
     } finally {
       setLoading(false);
     }
-  }, [input, token, loading, appendAssistant]);
+  }, [input, token, loading, patchEntry]);
 
   const handleAction = useCallback(
     async (action: UIAction) => {
       const sessionId = sessionIdRef.current;
       if (!token || loading) return;
       setLoading(true);
+      const confirmed = action.componentType === "confirmation" && action.payload.type === "confirm" && action.payload.confirmed;
       try {
         const response = await apiPost<AIUIResponse>("/api/ui-chat/action", {
           sessionId,
           action,
         });
         appendAssistant(response);
+        if (confirmed) {
+          // 确认后启动五 Agent 分析流，loading 一直保持到流结束
+          await runAnalysisStream(sessionId, (message) =>
+            setEntries((prev) => [
+              ...prev,
+              { id: nextEntryId(), role: "assistant", error: message },
+            ]),
+          );
+        }
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) setToken(null);
         setEntries((prev) => [
@@ -118,7 +198,7 @@ export function AIChatContainer() {
         setLoading(false);
       }
     },
-    [token, loading, appendAssistant],
+    [token, loading, appendAssistant, runAnalysisStream],
   );
 
   if (!token) {
@@ -195,6 +275,12 @@ export function AIChatContainer() {
               </div>
             ) : (
               <div className="flex flex-col items-start gap-3">
+                {entry.stream && (
+                  <StreamProgress
+                    stream={entry.stream}
+                    hasContent={Boolean(entry.text || entry.components?.length)}
+                  />
+                )}
                 {entry.text && (
                   <p className="text-sm leading-relaxed whitespace-pre-wrap text-slate-800">
                     {entry.text}

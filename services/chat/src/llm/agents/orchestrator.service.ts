@@ -25,6 +25,21 @@ export interface OrchestrationResult {
   report: string | null;
 }
 
+/** 流式编排事件：stage 供前端推进度条，delta 是 Markdown Agent 的逐段输出 */
+export type OrchestrationStreamEvent =
+  | { type: 'stage'; agent: string; index: number; total: number; label: string; percent: number }
+  | { type: 'delta'; text: string };
+
+export const PIPELINE_TOTAL = 5;
+
+const PIPELINE_LABELS: Record<string, string> = {
+  extract: '需求提取',
+  clarify: '澄清判断',
+  analysis: '多维度分析',
+  risk: '风险评估',
+  summary: '综合报告',
+};
+
 const PREVIEW_LIMIT = 200;
 const MAX_CLARIFY_QUESTIONS = 3;
 
@@ -58,12 +73,29 @@ export class AgentOrchestratorService {
   constructor(private readonly llm: LlmService) {}
 
   /**
-   * 固定编排：抽取 → 澄清判断 → 并行（分析 + 风控）→ 汇总。
+   * 固定编排：抽取 → 澄清判断 → 多维度分析 → 风险评估 → 综合报告。
    * retrievedContext 是检索增强上下文（会话历史 + 文档检索片段），
    * 非空时拼进输入，让每个 Agent 都能看到同一份背景；
    * 需要澄清时提前终止；任何环节失败走 manual_review 兜底。
    */
   async orchestrate(input: string, retrievedContext?: string): Promise<OrchestrationResult> {
+    const generator = this.streamOrchestration(input, retrievedContext);
+    let next = await generator.next();
+    while (!next.done) next = await generator.next();
+    return next.value;
+  }
+
+  /**
+   * orchestrate 的流式版本，是编排的唯一实现：
+   * 每个 Agent 开始前发 stage 事件（percent = index * 20），
+   * Markdown Agent（analysis/risk/summary）逐段发 delta，
+   * JSON Agent（extract/clarify）静默收集，只发进度。
+   * 分析/风控由并行改为顺序执行，换取流式文本的确定性。
+   */
+  async *streamOrchestration(
+    input: string,
+    retrievedContext?: string,
+  ): AsyncGenerator<OrchestrationStreamEvent, OrchestrationResult> {
     const agents = createSubAgents(this.chatModel());
     const steps: AgentStep[] = [];
     const usedAgents: string[] = [];
@@ -71,7 +103,17 @@ export class AgentOrchestratorService {
       ? `${input}\n\n${retrievedContext}`
       : input;
 
+    const stage = (agent: string, index: number): OrchestrationStreamEvent => ({
+      type: 'stage',
+      agent,
+      index,
+      total: PIPELINE_TOTAL,
+      label: PIPELINE_LABELS[agent] ?? agent,
+      percent: index * 20,
+    });
+
     try {
+      yield stage('extract', 0);
       const extracted = await this.runStep(
         'extract',
         async () => {
@@ -82,6 +124,7 @@ export class AgentOrchestratorService {
       );
       usedAgents.push('extract');
 
+      yield stage('clarify', 1);
       const clarify = await this.runStep(
         'clarify',
         async () => {
@@ -109,32 +152,63 @@ export class AgentOrchestratorService {
         };
       }
 
-      // 分析与风控互不依赖，并行执行
-      const [analysisRaw, riskRaw] = await Promise.all([
-        this.runStep<string>(
-          'analysis',
-          () => agents.analysisAgent.invoke({ input: effectiveInput, extracted }) as Promise<string>,
-          steps,
-        ),
-        this.runStep<string>(
-          'risk',
-          () => agents.riskAgent.invoke({ input: effectiveInput, extracted }) as Promise<string>,
-          steps,
-        ),
-      ]);
-      usedAgents.push('analysis', 'risk');
+      yield stage('analysis', 2);
+      let analysisRaw = '';
+      const analysisStart = Date.now();
+      try {
+        for await (const delta of (await agents.analysisAgent.stream({
+          input: effectiveInput,
+          extracted,
+        })) as AsyncIterable<string>) {
+          if (!delta) continue;
+          analysisRaw += delta;
+          yield { type: 'delta', text: delta };
+        }
+        this.finalizeStep('analysis', analysisRaw, analysisStart, steps);
+      } catch (error) {
+        this.failStep('analysis', error, analysisStart, steps);
+        throw error;
+      }
+      usedAgents.push('analysis');
 
-      const report = await this.runStep<string>(
-        'summary',
-        () =>
-          agents.summaryAgent.invoke({
-            input: effectiveInput,
-            extracted,
-            analysis: analysisRaw,
-            risk: riskRaw,
-          }) as Promise<string>,
-        steps,
-      );
+      yield stage('risk', 3);
+      let riskRaw = '';
+      const riskStart = Date.now();
+      try {
+        for await (const delta of (await agents.riskAgent.stream({
+          input: effectiveInput,
+          extracted,
+        })) as AsyncIterable<string>) {
+          if (!delta) continue;
+          riskRaw += delta;
+          yield { type: 'delta', text: delta };
+        }
+        this.finalizeStep('risk', riskRaw, riskStart, steps);
+      } catch (error) {
+        this.failStep('risk', error, riskStart, steps);
+        throw error;
+      }
+      usedAgents.push('risk');
+
+      yield stage('summary', 4);
+      let report = '';
+      const summaryStart = Date.now();
+      try {
+        for await (const delta of (await agents.summaryAgent.stream({
+          input: effectiveInput,
+          extracted,
+          analysis: analysisRaw,
+          risk: riskRaw,
+        })) as AsyncIterable<string>) {
+          if (!delta) continue;
+          report += delta;
+          yield { type: 'delta', text: delta };
+        }
+        this.finalizeStep('summary', report, summaryStart, steps);
+      } catch (error) {
+        this.failStep('summary', error, summaryStart, steps);
+        throw error;
+      }
       usedAgents.push('summary');
 
       return {
@@ -162,6 +236,30 @@ export class AgentOrchestratorService {
   private chatModel(): ChatOpenAI {
     // chatModel() 内部带 503 守卫：未配置密钥时快速失败，与其它路由行为一致
     return this.llm.chatModel();
+  }
+
+  /** 流式 Agent 消费完成后的落账与空输出校验，语义与 runStep 一致 */
+  private finalizeStep(agent: string, output: string, start: number, steps: AgentStep[]): void {
+    if (!output.trim()) {
+      const error = new Error(`${agent} 返回空输出（可能是推理预算耗尽或上游异常）`);
+      this.failStep(agent, error, start, steps);
+      throw error;
+    }
+    steps.push({
+      agent,
+      ok: true,
+      durationMs: Date.now() - start,
+      outputPreview: previewOf(output),
+    });
+  }
+
+  private failStep(agent: string, error: unknown, start: number, steps: AgentStep[]): void {
+    steps.push({
+      agent,
+      ok: false,
+      durationMs: Date.now() - start,
+      outputPreview: String(error).slice(0, PREVIEW_LIMIT),
+    });
   }
 
   private async runStep<T>(

@@ -20,13 +20,18 @@ function makeController() {
       .fn()
       .mockReturnValue({ message: '快捷操作', components: [] }),
   };
+  const analysisStream = {
+    streamAnalysis: vi.fn(),
+  };
   return {
     controller: new UiChatController(
       uiResponse as never,
       flow as never,
+      analysisStream as never,
     ),
     uiResponse,
     flow,
+    analysisStream,
   };
 }
 
@@ -143,5 +148,96 @@ describe('UiChatController', () => {
     expect(() => controller.handleAction({ action: { componentType: 'card', payload: { type: 'click', actionId: 'x' } } })).toThrow(
       /sessionId/,
     );
+  });
+});
+
+describe('UiChatController 流式端点', () => {
+  function makeFakeRes() {
+    const writes: string[] = [];
+    return {
+      writes,
+      setHeader: vi.fn(),
+      flushHeaders: vi.fn(),
+      write: vi.fn((chunk: string) => {
+        writes.push(chunk);
+        return true;
+      }),
+      end: vi.fn(),
+      on: vi.fn(),
+      writableEnded: false,
+    } as never;
+  }
+
+  function parseFrames(writes: string[]) {
+    return writes
+      .filter((w) => w.startsWith('event:'))
+      .map((w) => {
+        const [eventLine, dataLine] = w.split('\n');
+        return { event: eventLine.slice(7), data: JSON.parse(dataLine.slice(6)) };
+      });
+  }
+
+  it('POST chat/stream：delta 逐帧 → components 整包 → done，结束后一次性记录历史', async () => {
+    const { controller, uiResponse, flow } = makeController();
+    uiResponse.generateUIResponse.mockClear();
+    uiResponse.streamUIResponse = vi.fn(async function* () {
+      yield { type: 'delta', text: '你' };
+      yield { type: 'delta', text: '好' };
+      yield { type: 'components', components: [{ type: 'text', content: 'hi' }] };
+      yield { type: 'done' };
+    });
+    const res = makeFakeRes();
+
+    await controller.chatStream(res, { sessionId: 's1', input: '你好' });
+
+    const frames = parseFrames(res.writes);
+    expect(frames.map((f) => f.event)).toEqual(['delta', 'delta', 'components', 'done']);
+    expect(frames[0].data).toEqual({ text: '你' });
+    expect(frames[2].data.components).toHaveLength(1);
+    expect(res.end).toHaveBeenCalled();
+    expect(flow.recordAssistantResponse).toHaveBeenCalledWith('s1', {
+      message: '你好',
+      components: [{ type: 'text', content: 'hi' }],
+    });
+  });
+
+  it('POST chat/stream：生成器抛错时发 error 帧并结束，不记录历史', async () => {
+    const { controller, flow } = makeController();
+    (controller as never as { uiResponse: { streamUIResponse: unknown } }).uiResponse.streamUIResponse =
+      vi.fn(async function* () {
+        yield { type: 'delta', text: '部分' };
+        throw new Error('模型上游异常');
+      });
+    const res = makeFakeRes();
+
+    await controller.chatStream(res, { sessionId: 's1', input: 'x' });
+
+    const frames = parseFrames(res.writes);
+    expect(frames.map((f) => f.event)).toEqual(['delta', 'error']);
+    expect(frames[1].data.message).toContain('模型上游异常');
+    expect(flow.recordAssistantResponse).not.toHaveBeenCalled();
+  });
+
+  it('POST analysis/stream：stage/delta/components/done 依次成帧', async () => {
+    const { controller, analysisStream } = makeController();
+    analysisStream.streamAnalysis.mockImplementation(async function* () {
+      yield { type: 'stage', stage: { index: 0, total: 5, label: '需求提取', percent: 0 } };
+      yield { type: 'delta', text: '# 报告' };
+      yield { type: 'components', components: [{ type: 'steps', steps: [], currentStep: 0 }] };
+      yield { type: 'done', status: 'completed' };
+    });
+    const res = makeFakeRes();
+
+    await controller.analysisStreamSse(res, { sessionId: 's1' });
+
+    const frames = parseFrames(res.writes);
+    expect(frames.map((f) => f.event)).toEqual(['stage', 'delta', 'components', 'done']);
+    expect(frames[0].data.stage.percent).toBe(0);
+    expect(frames[3].data.status).toBe('completed');
+  });
+
+  it('POST analysis/stream：sessionId 缺失抛 400', async () => {
+    const { controller } = makeController();
+    await expect(controller.analysisStreamSse(makeFakeRes(), {})).rejects.toThrow(/sessionId/);
   });
 });

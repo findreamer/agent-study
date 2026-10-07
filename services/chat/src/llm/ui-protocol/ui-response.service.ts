@@ -3,8 +3,9 @@ import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { getApiKeys } from '../../config/api-keys.js';
 import { LlmService } from '../llm.service.js';
+import { textOf } from '../messages/text.js';
 import { aiUIResponseSchema } from './ui-schemas.js';
-import type { AIUIResponse } from './ui-types.js';
+import type { AIUIResponse, UIResponse } from './ui-types.js';
 
 export interface UIHistoryMessage {
   role: 'user' | 'assistant';
@@ -15,6 +16,12 @@ export interface UIRequestContext {
   sessionStage?: string;
   collectedData?: Record<string, unknown>;
 }
+
+/** 流式 UI 响应事件：delta 是第一阶段文字 token，components 是第二阶段整包 */
+export type UIStreamEvent =
+  | { type: 'delta'; text: string }
+  | { type: 'components'; components: UIResponse[] }
+  | { type: 'done' };
 
 const HISTORY_LIMIT = 12;
 
@@ -47,6 +54,15 @@ export const UI_RESPONSE_SYSTEM_PROMPT = `你是需求分析系统的对话助�
 5. 用户查询单个实体（如「查看需求 REQ-20240315-001」）时：返回 card 组件展示该需求详情
 6. 用户查询列表或批量数据时：返回 table 组件`;
 
+// 两阶段流式的阶段提示词后缀
+const STREAM_TEXT_SUFFIX = `
+
+当前为流式输出的第一阶段：直接输出面向用户的文字回复正文本身，不要输出 JSON、组件结构或协议说明；文字会逐字展示给用户，UI 组件将由系统随后另行生成。`;
+
+const STREAM_COMPONENTS_SUFFIX = `
+
+当前为流式输出的第二阶段：文字回复已经发送给用户，请只生成与之配套的 UI 组件，不要重复文字内容。`;
+
 @Injectable()
 export class UiResponseService {
   constructor(private readonly llm: LlmService) {}
@@ -68,6 +84,48 @@ export class UiResponseService {
     // components 带 .default([])：模型省略时 schema 兜底，这里归一化保证非空
     const parsed = await this.structuredModel().invoke(messages);
     return { ...parsed, components: parsed.components ?? [] };
+  }
+
+  /**
+   * 流式版本，"text streaming + component batching"：
+   * 第一阶段用普通 stream() 逐 token 吐文字（Markdown 可流式），
+   * 第二阶段用 withStructuredOutput 拿完整 JSON 后整包给组件。
+   * 消费方累积 delta/components 组装出与 generateUIResponse 同构的 AIUIResponse。
+   */
+  async *streamUIResponse(
+    input: string,
+    history: UIHistoryMessage[] = [],
+    context?: UIRequestContext,
+  ): AsyncGenerator<UIStreamEvent> {
+    const historyMessages = history.slice(-HISTORY_LIMIT).map((entry) =>
+      entry.role === 'user'
+        ? new HumanMessage(entry.content)
+        : new SystemMessage(`（你此前的回复）${entry.content}`),
+    );
+
+    let text = '';
+    for await (const chunk of await this.llm.chatModel().stream([
+      new SystemMessage(`${this.buildSystemPrompt(context)}${STREAM_TEXT_SUFFIX}`),
+      ...historyMessages,
+      new HumanMessage(input),
+    ])) {
+      const delta = textOf(chunk.content);
+      if (!delta) continue;
+      text += delta;
+      yield { type: 'delta', text: delta };
+    }
+
+    // 第二阶段：把已发出的文字交给结构化模型生成配套组件，保证文图一致
+    const parsed = await this.structuredModel().invoke([
+      new SystemMessage(
+        `${UI_RESPONSE_SYSTEM_PROMPT}${STREAM_COMPONENTS_SUFFIX}`,
+      ),
+      new HumanMessage(
+        `用户输入：${input}\n\n你已发出的文字回复：\n${text || '（无文字回复）'}\n\n请生成与之配套的 UI 组件（components 可为空数组，message 字段填一句话摘要即可）。`,
+      ),
+    ]);
+    yield { type: 'components', components: parsed.components ?? [] };
+    yield { type: 'done' };
   }
 
   private buildSystemPrompt(context?: UIRequestContext): string {

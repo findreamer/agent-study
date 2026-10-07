@@ -3,14 +3,18 @@ import {
   Body,
   Controller,
   Post,
+  Res,
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard.js';
+import { openSse, sseFrame } from '../../common/sse-frame.js';
+import { UiAnalysisStreamService } from './ui-analysis-stream.service.js';
 import { UiFlowService } from './ui-flow.service.js';
 import { UiResponseService } from './ui-response.service.js';
 import type { UIRequestContext } from './ui-response.service.js';
-import type { AIUIResponse, UIAction } from './ui-types.js';
+import type { AIUIResponse, UIAction, UIResponse } from './ui-types.js';
 
 const COMPONENT_TYPES = new Set([
   'text',
@@ -37,6 +41,7 @@ export class UiChatController {
   constructor(
     private readonly uiResponse: UiResponseService,
     private readonly flow: UiFlowService,
+    private readonly analysisStream: UiAnalysisStreamService,
   ) {}
 
   /** 自由输入：LLM Structured Output 生成带 UI 组件的结构化回复 */
@@ -132,6 +137,106 @@ export class UiChatController {
         };
       }
       throw error;
+    }
+  }
+
+  /**
+   * 流式对话：文字逐 token 下发（delta），组件等完整 JSON 后整包下发（components）。
+   * 流结束后一次性记录会话历史；客户端断开时停止生成。
+   */
+  @Post('chat/stream')
+  async chatStream(
+    @Res() res: Response,
+    @Body() body: { sessionId?: string; input?: string },
+  ): Promise<void> {
+    const sessionId = body?.sessionId;
+    const input = body?.input;
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      throw new BadRequestException('sessionId 必须是非空字符串');
+    }
+    if (typeof input !== 'string' || !input.trim()) {
+      throw new BadRequestException('input 必须是非空字符串');
+    }
+    const { history, ...context } = this.flow.recordUserInput(sessionId, input);
+
+    openSse(res);
+    let closed = false;
+    res.on('close', () => {
+      closed = true;
+    });
+
+    let text = '';
+    const components: UIResponse[] = [];
+    try {
+      for await (const event of this.uiResponse.streamUIResponse(input, history, context)) {
+        if (closed || res.writableEnded) break;
+        if (event.type === 'delta') {
+          text += event.text;
+          res.write(sseFrame('delta', { text: event.text }));
+        } else if (event.type === 'components') {
+          components.push(...event.components);
+          res.write(sseFrame('components', { components: event.components }));
+        } else {
+          res.write(sseFrame('done', {}));
+        }
+      }
+      this.flow.recordAssistantResponse(sessionId, { message: text, components });
+    } catch (error) {
+      if (!closed && !res.writableEnded) {
+        res.write(
+          sseFrame('error', {
+            message: error instanceof Error ? error.message : '生成失败',
+          }),
+        );
+      }
+    } finally {
+      if (!res.writableEnded) res.end();
+    }
+  }
+
+  /**
+   * 流式分析：确认后启动五 Agent 流水线，stage 事件驱动进度条，
+   * Markdown Agent 逐段下发，组件整包收尾。
+   */
+  @Post('analysis/stream')
+  async analysisStreamSse(
+    @Res() res: Response,
+    @Body() body: { sessionId?: string },
+  ): Promise<void> {
+    const sessionId = body?.sessionId;
+    if (typeof sessionId !== 'string' || !sessionId.trim()) {
+      throw new BadRequestException('sessionId 必须是非空字符串');
+    }
+
+    openSse(res);
+    let closed = false;
+    res.on('close', () => {
+      closed = true;
+    });
+
+    try {
+      for await (const event of this.analysisStream.streamAnalysis(sessionId)) {
+        if (closed || res.writableEnded) break;
+        if (event.type === 'stage') {
+          res.write(sseFrame('stage', { stage: event.stage }));
+        } else if (event.type === 'delta') {
+          res.write(sseFrame('delta', { text: event.text }));
+        } else if (event.type === 'components') {
+          res.write(sseFrame('components', { components: event.components }));
+        } else {
+          res.write(sseFrame('done', { status: event.status }));
+        }
+      }
+    } catch (error) {
+      if (!closed && !res.writableEnded) {
+        res.write(
+          sseFrame('error', {
+            message: error instanceof Error ? error.message : '分析失败',
+          }),
+        );
+      }
+    } finally {
+      if (!res.writableEnded) res.end();
     }
   }
 }

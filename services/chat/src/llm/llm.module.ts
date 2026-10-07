@@ -15,6 +15,7 @@ import { AgentOrchestratorService } from './agents/orchestrator.service.js';
 import { UiChatController } from './ui-protocol/ui-chat.controller.js';
 import { UiResponseService } from './ui-protocol/ui-response.service.js';
 import { UiFlowService } from './ui-protocol/ui-flow.service.js';
+import { UiAnalysisStreamService } from './ui-protocol/ui-analysis-stream.service.js';
 
 @Module({
   // UiChatController 带 JwtAuthGuard，守卫实例化需要 AuthModule
@@ -30,6 +31,7 @@ import { UiFlowService } from './ui-protocol/ui-flow.service.js';
     AgentOrchestratorService,
     UiResponseService,
     UiFlowService,
+    UiAnalysisStreamService,
   ],
   exports: [
     LlmService,
