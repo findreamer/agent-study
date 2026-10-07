@@ -73,6 +73,45 @@ describe('UiChatController', () => {
     );
   });
 
+  it('POST generate：无状态生成，历史固定为空、context 原样透传', async () => {
+    const { controller, uiResponse, flow } = makeController();
+
+    const result = await controller.generate({
+      input: '把这段结论渲染成卡片：结论可行，建议先做 P0',
+      context: { sessionStage: 'result', collectedData: { requirementType: '功能需求' } },
+    });
+
+    expect(result.message).toBe('请选择需求类型');
+    expect(uiResponse.generateUIResponse).toHaveBeenCalledWith(
+      '把这段结论渲染成卡片：结论可行，建议先做 P0',
+      [],
+      { sessionStage: 'result', collectedData: { requirementType: '功能需求' } },
+    );
+    expect(flow.recordUserInput).not.toHaveBeenCalled();
+    expect(flow.recordAssistantResponse).not.toHaveBeenCalled();
+  });
+
+  it('POST generate：LLM 503 时返回静态降级入口，不经过流程服务', async () => {
+    const { controller, uiResponse, flow } = makeController();
+    uiResponse.generateUIResponse.mockRejectedValue(
+      new ServiceUnavailableException('LLM 未就绪'),
+    );
+
+    const result = await controller.generate({ input: '随便生成一个' });
+
+    expect(result.message).toContain('暂不可用');
+    expect(result.components[0]).toMatchObject({ type: 'action_buttons' });
+    expect(result.context).toBeUndefined();
+    expect(flow.buildDefaultEntry).not.toHaveBeenCalled();
+  });
+
+  it('POST generate：LLM 其他错误照常抛出；input 缺失抛 400', async () => {
+    const { controller, uiResponse } = makeController();
+    uiResponse.generateUIResponse.mockRejectedValue(new Error('模型输出解析失败'));
+    await expect(controller.generate({ input: 'x' })).rejects.toThrow(/解析失败/);
+    await expect(controller.generate({})).rejects.toThrow(/input/);
+  });
+
   it('POST action：校验后委托 UiFlowService.handleAction', () => {
     const { controller, flow } = makeController();
 

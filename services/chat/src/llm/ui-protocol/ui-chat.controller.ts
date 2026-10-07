@@ -9,6 +9,7 @@ import {
 import { JwtAuthGuard } from '../../auth/jwt-auth.guard.js';
 import { UiFlowService } from './ui-flow.service.js';
 import { UiResponseService } from './ui-response.service.js';
+import type { UIRequestContext } from './ui-response.service.js';
 import type { AIUIResponse, UIAction } from './ui-types.js';
 
 const COMPONENT_TYPES = new Set([
@@ -93,5 +94,44 @@ export class UiChatController {
       throw new BadRequestException('action.payload.type 非法');
     }
     return this.flow.handleAction(sessionId, action);
+  }
+
+  /**
+   * 无状态纯生成：不建会话、不留状态，把一段现成内容转成 UI 组件。
+   * 适合一次性渲染（如把分析结论变成卡片）与组件预览，历史固定为空。
+   */
+  @Post('generate')
+  async generate(
+    @Body() body: { input?: string; context?: UIRequestContext },
+  ): Promise<AIUIResponse> {
+    const input = body?.input;
+    if (typeof input !== 'string' || !input.trim()) {
+      throw new BadRequestException('input 必须是非空字符串');
+    }
+    const context = body?.context;
+    if (context !== undefined && (typeof context !== 'object' || context === null)) {
+      throw new BadRequestException('context 必须是对象');
+    }
+    try {
+      return await this.uiResponse.generateUIResponse(input, [], context);
+    } catch (error) {
+      // 无状态接口的降级同样无状态：静态快捷入口，不经过流程服务、不建 session
+      if (error instanceof ServiceUnavailableException) {
+        return {
+          message: '智能生成暂不可用，请稍后重试或使用快捷操作。',
+          components: [
+            {
+              type: 'action_buttons',
+              buttons: [
+                { id: 'new_requirement', label: '提交新需求', style: 'primary' },
+                { id: 'view_requirements', label: '查看需求列表' },
+              ],
+              layout: 'horizontal',
+            },
+          ],
+        };
+      }
+      throw error;
+    }
   }
 }
