@@ -6,7 +6,9 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 
 export function configureApp(app: INestApplication): void {
   app.setGlobalPrefix('api');
-  app.enableCors({ origin: env.CORS_ORIGIN, credentials: true });
+  // CORS_ORIGIN 支持逗号分隔多个来源（admin-web 3003 / chat-web 3002）
+  const origins = env.CORS_ORIGIN.split(',').map((origin) => origin.trim());
+  app.enableCors({ origin: origins, credentials: true });
   app.use(cookieParser());
   app.useGlobalFilters(new HttpExceptionFilter());
   app.useGlobalInterceptors(new TransformInterceptor());
