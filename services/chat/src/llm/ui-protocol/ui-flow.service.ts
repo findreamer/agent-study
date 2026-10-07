@@ -87,6 +87,12 @@ const REQUIREMENT_FORM_FIELDS: FormResponse['fields'] = [
     required: true,
     placeholder: '描述业务背景、要解决的问题与预期效果',
   },
+  {
+    name: 'acceptanceCriteria',
+    label: '验收标准',
+    type: 'textarea',
+    placeholder: '可量化的验收条件，如数据量上限、异常处理方式',
+  },
   { name: 'expectedDate', label: '期望上线日期', type: 'date' },
   { name: 'budget', label: '预算（万元）', type: 'number' },
 ];
@@ -142,6 +148,7 @@ const FIELD_LABELS: Record<string, string> = {
   priority: '优先级',
   targetUsers: '目标用户',
   description: '需求描述',
+  acceptanceCriteria: '验收标准',
   expectedDate: '期望上线日期',
   budget: '预算（万元）',
 };
