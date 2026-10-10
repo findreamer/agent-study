@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { ChatOpenAI } from '@langchain/openai';
 import { LlmService } from '../llm.service.js';
+import { extractJson } from './json-output.js';
 import { createSubAgents } from './sub-agents.js';
 
 export interface AgentStep {
@@ -42,16 +43,6 @@ const PIPELINE_LABELS: Record<string, string> = {
 
 const PREVIEW_LIMIT = 200;
 const MAX_CLARIFY_QUESTIONS = 3;
-
-/** 从模型输出中提取 JSON：容忍 markdown 代码围栏与前后缀文本。 */
-function extractJson(raw: string): Record<string, unknown> {
-  const start = raw.indexOf('{');
-  const end = raw.lastIndexOf('}');
-  if (start === -1 || end <= start) {
-    throw new Error(`输出中不包含 JSON：${raw.slice(0, PREVIEW_LIMIT)}`);
-  }
-  return JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
-}
 
 function asQuestions(value: unknown): string[] {
   if (Array.isArray(value)) {

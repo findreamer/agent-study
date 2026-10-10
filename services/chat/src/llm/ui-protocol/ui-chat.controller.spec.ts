@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ServiceUnavailableException } from '@nestjs/common';
+import type { Response } from 'express';
 import { UiChatController } from './ui-chat.controller.js';
 import type { AIUIResponse } from './ui-types.js';
 
@@ -9,6 +10,7 @@ function makeController() {
       message: '请选择需求类型',
       components: [{ type: 'selection', title: 't', options: [{ id: 'feature', label: '新功能' }] }],
     } satisfies AIUIResponse),
+    streamUIResponse: vi.fn(),
   };
   const flow = {
     recordUserInput: vi
@@ -152,7 +154,11 @@ describe('UiChatController', () => {
 });
 
 describe('UiChatController 流式端点', () => {
-  function makeFakeRes() {
+  type FakeRes = Response & {
+    writes: string[];
+    end: ReturnType<typeof vi.fn>;
+    writableEnded: boolean;
+  };  function makeFakeRes(): FakeRes {
     const writes: string[] = [];
     return {
       writes,
@@ -165,7 +171,7 @@ describe('UiChatController 流式端点', () => {
       end: vi.fn(),
       on: vi.fn(),
       writableEnded: false,
-    } as never;
+    } as unknown as FakeRes;
   }
 
   function parseFrames(writes: string[]) {
