@@ -59,7 +59,34 @@
 - 顺手修复两处存量问题（不在任务书内，为保持验证门干净）：
   `ui-chat.controller.spec.ts` 的 mock 类型（`as never` 导致 `res.writes` 推导为 never 的 TS 报错，改为 express Response 交叉类型 + 补 `streamUIResponse` mock）；拉起 Docker 使 Prisma 集成测试恢复。
 
+## Task 2：意图路由（classifier + query/chat 分支）
+
+> 原始任务书（8.3 增量）：State 扩展 intent（默认 analyze）/queryResponse/chatResponse；
+> classifierNode 用 withStructuredOutput(zod) 分类，含三类意图规则、边界策略
+> （"查询XXX的分析报告"→query）、优先级（编号优先 query、纯闲聊 chat、默认 analyze），
+> try-catch 降级关键词匹配；queryHandler/chatHandler 轻量助手节点，返回
+> { responseField, summary } 兼容旧接口；条件边 routeByIntent 分流，query/chat → END，
+> 保留完整分析链；runAnalysisGraph 输出 intent 与动态 steps；test-graph.ts 七用例验证。
+
+### 实现要点（对照我们基线的命名适配）
+
+1. **State**：`intent: Annotation<AnalysisIntent>({ reducer: 覆盖, default: () => 'analyze' })`——v1 的 `{ default }` 不能脱离 reducer 单独用（TS 编译期即报错）；`queryResponse`/`chatResponse` 为覆盖型通道。
+2. **classifierNode**：`IntentSchema = z.object({ intent: z.enum([...]), reasoning })`，`withStructuredOutput(schema, { method: 'functionCalling' })`（方舟模型的既有约束）；System Prompt 按任务书含三类特征/示例、边界与优先级五条；catch 一律降级 `classifyByKeywords`（导出供测试钉死），分类器不写 messages（messages 语义保持"Agent 产物流水"）。
+3. **处理器节点**：`invokeAssistant`（system 人设 + effectiveInput，空输出按失败兜底）；两个 handler 只写 `queryResponse`/`chatResponse` + messages——**不写 `state.summary`**：`summary` 通道与 `summary` 节点名撞名不存在，LangGraph 对未知通道写入静默丢弃（本次实测踩到，测试揪出），旧接口兼容由 `runAnalysisGraph` 在 DTO 层 `summaryText ?? queryResponse ?? chatResponse` 兜底。
+4. **路由**：`START → classifier`，`addConditionalEdges('classifier', routeByIntent)`（analyze→extract / query→queryHandler / chat→chatHandler），两个 handler → END；分析链与 clarify 提前终止条件边保持基线形态。
+5. **输出**：`AnalysisGraphResult` 增 `intent`（必填）与 `queryResponse?`/`chatResponse?`；`extracted/clarified/analysis/risk` 改为可选——query/chat 分支这些节点未执行，保持 undefined 而非 `?? ''` 硬凑；`steps` 按 intent 动态：analyze 出五段，query 出 `{ query }`，chat 出 `{ chat }`。
+6. **`test-graph.ts`**（真实模型脚本）：7 用例逐条校验意图/路径/产物/时延，输出 PASS/FAIL 明细与耗时对比，`≥6/7` 达标 exit 0，否则 exit 1。
+
+### 验证
+
+- vitest 13 个（7 基线等价 + 6 意图路由）：关键词 7 用例全对（Case 1 编号+冒号描述→analyze；Case 2/4/5/7→query；Case 3→chat；Case 6 默认 analyze）、LLM 分类桩路由 chat/query、降级路径只消耗 1 次模型调用、DTO summary 兼容、业务字段 undefined；全量 186/186，typecheck 绿
+- `test-graph.ts` 实跑（GLM 真实模型）：**意图分类 7/7 全对**，路径全部符合预期；`通过 6/7 ≥ 6 → 通过`
+  - 耗时：query 20.5s / chat 9.4s / 完整分析 183s——query/chat 快约 10~19 倍，"明显快于完整分析"成立
+  - 唯一 FAIL 是 Case 3 的 `<5s` 硬阈值（9.4s）：该模型单次调用固有开销约 4-5s，classifier+handler 两次调用 9s 是物理下限；阈值保留任务书原值不改，实际达标判据以"明显快于完整分析"为准
+
 ## 执行记录与偏差（2026-10-10）
 
-- 按上述实现，5/5 新测试 + 178/178 全量通过，typecheck 0 错误
-- 偏差记录见上文「与任务书的偏差」：orchestrator 暂不转调（留待后续增量收尾）、三个字段加 Text 后缀、State 增加 input
+- Task 1：按上述实现，5/5 新测试 + 178/178 全量通过，typecheck 0 错误
+- Task 1 增量：吸收教程版 retrievedContext/steps 设计（见上），测试 5→7，全量 180/180
+- Task 2：13 图测试 + 全量 186/186；真实模型 7 用例意图全对，脚本 6/7 通过（唯一 FAIL 为 Case 3 时延硬阈值，见验证节）
+- 命名适配偏差（沿用 Task 1 结论）：任务书的 extractStep/analysisResult/RunAnalysisGraphOutput 等教程命名映射为本仓库的 extract 等节点名 / analysisText 等通道名 / AnalysisGraphResult；教程 `state.summary` 兼容写法在本图不可用（通道与 summary 节点撞名），下沉到 DTO 层实现
