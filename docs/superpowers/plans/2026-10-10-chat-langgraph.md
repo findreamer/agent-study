@@ -37,6 +37,16 @@
 - **State 增加 `input`**：节点需要原始需求才能调用 Agent，`createAnalysisGraph()` 无参签名下 input 必须走 State 传递。
 - **`MessagesAnnotation.spec` 必须展开**（`...MessagesAnnotation.spec`）：spec 本身是 `{ messages: channel }` 对象，嵌套赋值（`messages: MessagesAnnotation.spec`）会被静默丢弃写入——v1.4.18 实测最小复现确认，节点内写 messages 不生效、最终 State 不含该键。
 
+### 增量：吸收教程基线的两个设计（2026-10-10 第二笔）
+
+对照教程版 `requirement-analysis-graph.ts` 评审后，吸收两项、拒绝一项：
+
+1. **retrievedContext 进 State（吸收，但全节点可见）**：State 增加 `retrievedContext: Annotation<string>`，节点侧 `effectiveInputOf(state)` 在上下文非空白时拼进输入——与 orchestrator.orchestrate 的 effectiveInput 同一套规则，五个 Agent 都能看到同一份背景（教程版只有 summary 能看到，是业务收窄，不学）。`runAnalysisGraph(input, retrievedContext = '')` 增加可选第二参。这是为后续 checkpointer 断点恢复铺路：上下文作为状态字段，恢复时可见。
+2. **runAnalysisGraph 返回展平结果 + steps 记账（吸收）**：新增 `AnalysisGraphResult`（字段用业务名，不带 Text 后缀——DTO 层与 State 通道解耦）与 `AnalysisGraphSteps`（extract/clarify 为 JSON 串，analysis/risk/summary 为原文），朝 OrchestrationResult 的转调形状对齐；clarify 提前终止时 analysis/risk/summary 为空串。
+3. **parseJson 静默兜底（拒绝）**：教程版解析失败给默认值（clarify 失败会被当成"不需要澄清"，垃圾数据流进下游），且正则只认第一段 json 围栏。保留我们的 extractJson 抛错语义（fail-fast → 上层 manual_review 兜底），另有正则容忍度与 extract schema（isComplete/missingFields vs 我们的 action/features 契约）差异，均记于评审结论。
+
+测试从 5 个增至 7 个：新增「retrievedContext 五 Agent 可见」「空白不拼接」两条；等价性断言切到展平返回 + steps 全量比对；messages 断言改走 `graph.invoke`（展平返回不含 State 的 messages）。全量 180/180，typecheck 绿。
+
 ### 验证
 
 - `src/llm/graph/requirement-analysis-graph.spec.ts` 5 个测试，全部脚本化模型（拦截 `createChatModel` 防真实网络）：
